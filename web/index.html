@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NullIME 웹 데모</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>NullIME</h1>
+  <p class="lead">언어 전환 없이 영어, 한글(두벌식), 일본어(로마자, 한자)를 그냥 입력한다. 키를 누를 때마다 가장 그럴듯한 해석이 조합 창에 보인다.</p>
+  <p class="note">OS 입력 언어는 영어로 두는 편이 가장 잘 동작한다. 이 페이지는 물리 키(<code>event.code</code>)를 직접 읽는다.</p>
+
+  <label for="editor" id="editor-label">입력 영역 (여기를 클릭하고 타자를 친다)</label>
+  <div id="editor" role="textbox" aria-multiline="true" aria-labelledby="editor-label" aria-describedby="help" tabindex="0" spellcheck="false"></div>
+  <div id="status" role="status">wasm 불러오는 중...</div>
+
+  <ul id="help" class="legend">
+    <li><kbd>←</kbd><kbd>→</kbd> 칸 이동</li>
+    <li><kbd>↑</kbd><kbd>↓</kbd> 후보 선택</li>
+    <li><kbd>Space</kbd><kbd>Enter</kbd> 확정 후 키 입력</li>
+    <li><kbd>Backspace</kbd> 마지막 키 입력 취소</li>
+  </ul>
+  <p><button type="button" id="clear">지우기</button></p>
+
+  <details open>
+    <summary>디버그: 마지막 Response</summary>
+    <pre id="debug">(아직 없음)</pre>
+  </details>
+</main>
+<script type="module" src="main.js"></script>
+</body>
+</html>
