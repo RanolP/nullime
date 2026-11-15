@@ -1,0 +1,2 @@
+[tools]
+"cargo:wasm-bindgen-cli" = "0.2.130"
