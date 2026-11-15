@@ -27,6 +27,12 @@ const EN_WORD_PER_LETTER: f32 = 0.5;
 const EN_NON_WORD_PER_LETTER: f32 = -1.0;
 const WORD_BONUS: f32 = 1.0;
 const JA_RANK_STEP: f32 = 0.05;
+// Japanese with a conversion cost: a per-letter gain minus the path cost.
+// Linear in cost, so a sentence split in two pays the extra BOS/EOS
+// connection costs and loses to one segment. Calibrated on the Mozc asset
+// (docs/architecture.md "점수").
+const JA_PER_LETTER: f32 = 1.0;
+const JA_COST_SCALE: f32 = 2500.0;
 // Must outweigh short high-scoring pieces (the one-letter word "i"), or
 // `konnichiha` splits into こん|i|초|i|は.
 const SEGMENT_PENALTY: f32 = 1.5;
@@ -73,7 +79,10 @@ impl Scorer for BaselineScorer {
         match candidate.lang {
             Lang::En => self.english(&candidate.text),
             Lang::Ko => self.korean(&candidate.text, letters),
-            Lang::Ja => PER_LETTER * letters - JA_RANK_STEP * rank as f32,
+            Lang::Ja => match candidate.cost {
+                Some(cost) => JA_PER_LETTER * letters - cost as f32 / JA_COST_SCALE,
+                None => PER_LETTER * letters - JA_RANK_STEP * rank as f32,
+            },
         }
     }
 

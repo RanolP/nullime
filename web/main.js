@@ -137,12 +137,76 @@ document.getElementById('clear').addEventListener('click', () => {
   editor.focus();
 });
 
+const dictStatusEl = document.getElementById('dict-status');
+const dictFullBtn = document.getElementById('dict-full');
+const dictFileInput = document.getElementById('dict-file');
+const FULL_LABEL = '전체 사전';
+
+// Status line describing the engine in use, without any load-failure note.
+let currentStatus = '';
+
+// Swapping engines drops the composition; commit it first so no text is lost.
+function swapEngine(next, label) {
+  if (engine && preedit) handle(engine.reset(), KEY.Other);
+  engine?.free();
+  engine = next;
+  dictFullBtn.disabled = label === FULL_LABEL;
+  const n = next.dictionaryEntries;
+  currentStatus = n === undefined
+    ? '사전 없음: 샘플 사전 사용'
+    : `사전 로드됨: ${label} (${n.toLocaleString()}개 항목)`;
+  dictStatusEl.textContent = currentStatus;
+}
+
+async function fetchDictionary(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// Of the loads that succeed, the most recently started wins: a slow startup
+// fetch must not replace a dictionary the user picked meanwhile, but a newer
+// load that fails must not discard an older one that succeeds.
+let latestStarted = 0;
+let applied = 0; // sequence number of the load whose engine is in use
+
+// Leaves the current engine in place when the dictionary cannot be loaded.
+// Returns whether this load's dictionary is now in use.
+async function loadDictionary(label, getBytes) {
+  const load = ++latestStarted;
+  dictStatusEl.textContent = `${label} 불러오는 중...`;
+  try {
+    const bytes = await getBytes();
+    if (load < applied) return false;
+    swapEngine(Engine.withDictionary(bytes), label);
+    applied = load;
+    return true;
+  } catch (err) {
+    console.error(err);
+    if (load > applied) dictStatusEl.textContent = `${currentStatus} (${label} 로드 실패: ${err.message ?? err})`;
+    return false;
+  }
+}
+
+dictFullBtn.addEventListener('click', async () => {
+  dictFullBtn.disabled = true;
+  const ok = await loadDictionary(FULL_LABEL, () => fetchDictionary('assets/nullime-ja.dict'));
+  if (!ok) dictFullBtn.disabled = false;
+});
+
+dictFileInput.addEventListener('change', async () => {
+  const file = dictFileInput.files?.[0];
+  if (file) await loadDictionary(file.name, async () => new Uint8Array(await file.arrayBuffer()));
+});
+
 render();
 try {
   await init();
-  engine = new Engine();
+  swapEngine(new Engine(), '');
   statusEl.textContent = '준비됨. 입력 영역을 클릭하고 타자를 친다.';
 } catch (err) {
   statusEl.textContent = `wasm 로드 실패: ${err}. web/README.md의 빌드 명령을 먼저 실행한다.`;
+  dictStatusEl.textContent = '';
   console.error(err);
 }
+if (engine) await loadDictionary('작은 사전', () => fetchDictionary('assets/nullime-ja.small.dict'));

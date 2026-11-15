@@ -25,6 +25,16 @@
   </ul>
   <p><button type="button" id="clear">지우기</button></p>
 
+  <section aria-labelledby="dict-heading">
+    <h2 id="dict-heading">일본어 사전</h2>
+    <p id="dict-status" role="status">사전 불러오는 중...</p>
+    <p>
+      <button type="button" id="dict-full">전체 사전 받기</button>
+      <label for="dict-file">내 사전 파일(<code>.dict</code>) 쓰기</label>
+      <input type="file" id="dict-file" accept=".dict">
+    </p>
+  </section>
+
   <details open>
     <summary>디버그: 마지막 Response</summary>
     <pre id="debug">(아직 없음)</pre>

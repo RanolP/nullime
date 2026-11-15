@@ -6,13 +6,29 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub struct Engine(nullime_engine::Engine);
+pub struct Engine(nullime_engine::Engine, Option<u32>);
 
 #[wasm_bindgen]
 impl Engine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Engine {
-        Engine(nullime_engine::Engine::new())
+        Engine(nullime_engine::Engine::new(), None)
+    }
+
+    /// An engine converting Japanese with a `nullime-ja.dict` file's bytes;
+    /// throws when they are not a valid asset.
+    #[wasm_bindgen(js_name = withDictionary)]
+    pub fn with_dictionary(bytes: Vec<u8>) -> Result<Engine, JsError> {
+        let asset = nullime_engine::ja_asset::JaAsset::new(bytes)?;
+        let entries = asset.entry_count() as u32;
+        Ok(Engine(nullime_engine::Engine::with_ja_dictionary(asset), Some(entries)))
+    }
+
+    /// Entry count of the loaded dictionary, for the status line; undefined
+    /// for the built-in sample.
+    #[wasm_bindgen(getter, js_name = dictionaryEntries)]
+    pub fn dictionary_entries(&self) -> Option<u32> {
+        self.1
     }
 
     /// `key`: 0=Other 1=Char 2=Space 3=Enter 4=Backspace 5=Left 6=Right 7=Up 8=Down.

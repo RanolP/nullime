@@ -1,0 +1,10 @@
+[package]
+name = "nullime-dict"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+nullime-engine = { path = "../../crates/nullime-engine" }
+serde_json = "1"
+yada = "0.7.0"

@@ -199,7 +199,7 @@ pub struct HangulInterpreter;
 
 impl Interpreter for HangulInterpreter {
     fn interpret(&self, strokes: &[Stroke]) -> Vec<Candidate> {
-        vec![Candidate { text: compose(strokes), lang: Lang::Ko }]
+        vec![Candidate { text: compose(strokes), lang: Lang::Ko, cost: None }]
     }
 }
 

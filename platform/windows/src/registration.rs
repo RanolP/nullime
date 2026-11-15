@@ -91,7 +91,7 @@ fn clsid_key() -> String {
     format!("CLSID\\{{{CLSID_NULLIME:?}}}")
 }
 
-fn dll_path() -> windows::core::Result<Vec<u16>> {
+pub(crate) fn dll_path() -> windows::core::Result<Vec<u16>> {
     let mut buf = vec![0u16; 1024];
     let len = unsafe { GetModuleFileNameW(Some(crate::module()), &mut buf) } as usize;
     if len == 0 || len >= buf.len() {

@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 nullime-engine = { path = "../../crates/nullime-engine" }
+memmap2 = "0.9.12"
 # #[implement] expands to paths under `windows_core`.
 windows-core = "0.62.2"
 
@@ -21,6 +22,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Ole",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
     "Win32_System_Registry",
     "Win32_System_SystemServices",
     "Win32_System_Variant",

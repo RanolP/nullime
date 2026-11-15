@@ -2,6 +2,7 @@
 
 mod candidate_window;
 mod composition;
+mod dictionary;
 mod display_attribute;
 mod keymap;
 mod registration;

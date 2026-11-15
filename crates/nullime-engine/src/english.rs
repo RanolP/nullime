@@ -10,7 +10,7 @@ impl Interpreter for EnglishInterpreter {
             .iter()
             .map(|s| if s.shift { s.ch.to_ascii_uppercase() } else { s.ch } as char)
             .collect();
-        vec![Candidate { text, lang: Lang::En }]
+        vec![Candidate { text, lang: Lang::En, cost: None }]
     }
 }
 

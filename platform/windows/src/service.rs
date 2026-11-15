@@ -55,7 +55,7 @@ pub struct TextService {
 impl TextService {
     pub fn new() -> TextService {
         crate::server::lock();
-        TextService { engine: RefCell::new(Engine::new()), session: RefCell::default(), composing: Cell::new(false) }
+        TextService { engine: RefCell::new(crate::dictionary::engine()), session: RefCell::default(), composing: Cell::new(false) }
     }
 
     pub fn atoms(&self) -> Atoms {

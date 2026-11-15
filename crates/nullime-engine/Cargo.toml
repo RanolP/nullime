@@ -8,3 +8,4 @@ serde = ["dep:serde"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
+yada = "0.7.0"

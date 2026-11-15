@@ -3,7 +3,8 @@
 use crate::decode::Lattice;
 use crate::english::EnglishInterpreter;
 use crate::hangul::HangulInterpreter;
-use crate::kanji::SampleDictionary;
+use crate::ja_asset::JaAsset;
+use crate::kanji::{Connection, Dictionary, SampleDictionary};
 use crate::romaji::JapaneseInterpreter;
 use crate::scorer::{BaselineScorer, Scorer};
 use crate::{Interpreter, Key, KeyEvent, Preedit, Response, Segment, Stroke};
@@ -38,12 +39,24 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Japanese uses the built-in `SampleDictionary`; see `with_ja_dictionary`.
     pub fn new() -> Engine {
+        Engine::with_ja_model(SampleDictionary)
+    }
+
+    /// Japanese conversion from a loaded `nullime-ja.dict` (D15). The engine
+    /// keeps the asset, which shares its bytes (docs/architecture.md
+    /// "일본어 사전 애셋").
+    pub fn with_ja_dictionary(asset: JaAsset) -> Engine {
+        Engine::with_ja_model(asset)
+    }
+
+    fn with_ja_model(model: impl Dictionary + Connection + 'static) -> Engine {
         Engine::with_parts(
             vec![
                 Box::new(EnglishInterpreter),
                 Box::new(HangulInterpreter),
-                Box::new(JapaneseInterpreter { dictionary: SampleDictionary }),
+                Box::new(JapaneseInterpreter { dictionary: model }),
             ],
             Box::new(BaselineScorer::default()),
         )

@@ -1,7 +1,8 @@
 //! Romaji (Hepburn + Kunrei common table) to kana, plus the Japanese
-//! interpreter that adds kanji from a `Dictionary`.
+//! interpreter that converts each reading to kanji (`ja_convert`).
 
-use crate::kanji::Dictionary;
+use crate::ja_convert::convert;
+use crate::kanji::{Connection, Dictionary};
 use crate::{Candidate, Interpreter, Lang, Stroke};
 
 const TABLE: &[(&str, &str)] = &[
@@ -157,19 +158,36 @@ pub struct JapaneseInterpreter<D> {
     pub dictionary: D,
 }
 
-impl<D: Dictionary> Interpreter for JapaneseInterpreter<D> {
-    /// Hiragana readings first, then dictionary kanji for each reading, then
-    /// katakana.
+/// Conversions kept for the first reading; other readings (only `n`
+/// ambiguity produces them) get fewer, since they rarely win.
+const N_BEST: usize = 8;
+const N_BEST_ALT: usize = 2;
+
+impl<D: Dictionary + Connection> Interpreter for JapaneseInterpreter<D> {
+    /// Conversions of every reading by path cost, then any hiragana reading
+    /// and the katakana not already among them. Every candidate carries a
+    /// cost so the scorer can rank them against other languages.
     fn interpret(&self, strokes: &[Stroke]) -> Vec<Candidate> {
         let romaji: String = strokes.iter().map(|s| s.ch as char).collect();
         let readings = to_hiragana(&romaji);
-        let ja = |text: String| Candidate { text, lang: Lang::Ja };
-        let mut out: Vec<Candidate> = readings.iter().cloned().map(ja).collect();
-        for reading in &readings {
-            out.extend(self.dictionary.lookup(reading).into_iter().map(|k| ja(k.to_string())));
+        let mut out: Vec<Candidate> = Vec::new();
+        for (i, reading) in readings.iter().enumerate() {
+            let n = if i == 0 { N_BEST } else { N_BEST_ALT };
+            out.extend(convert(&self.dictionary, reading, n).into_iter().map(|c| Candidate {
+                text: c.surface,
+                lang: Lang::Ja,
+                cost: Some(c.cost),
+            }));
         }
-        out.extend(readings.iter().map(|r| ja(to_katakana(r))));
-        out.dedup();
+        out.sort_by_key(|c| c.cost);
+        let mut worst = out.last().and_then(|c| c.cost).unwrap_or(0);
+        let kana = readings.iter().cloned().chain(readings.iter().map(|r| to_katakana(r)));
+        for text in kana {
+            worst += 1;
+            out.push(Candidate { text, lang: Lang::Ja, cost: Some(worst) });
+        }
+        let mut seen = std::collections::HashSet::new();
+        out.retain(|c| seen.insert(c.text.clone()));
         out
     }
 }

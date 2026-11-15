@@ -14,6 +14,24 @@ cargo build --release --target wasm32-unknown-unknown -p nullime-wasm
 wasm-bindgen --target web --out-dir web/pkg target/wasm32-unknown-unknown/release/nullime_wasm.wasm
 ```
 
+### 일본어 사전
+
+사전 애셋은 저장소에 없다(`.gitignore`). 없으면 데모는 내장 샘플 사전으로 동작하고 상태 줄에 "사전 없음: 샘플 사전 사용"을 띄운다. 만들려면 Mozc OSS 사전을 받아 두 애셋을 빌드한다. 받는 위치는 저장소 밖이어도 된다.
+
+```sh
+cargo run --release -p nullime-dict -- fetch --out ../mozc-dictionary-oss
+```
+
+```sh
+cargo run --release -p nullime-dict -- build --mozc ../mozc-dictionary-oss --out web/assets/nullime-ja.dict
+```
+
+```sh
+cargo run --release -p nullime-dict -- build --mozc ../mozc-dictionary-oss --out web/assets/nullime-ja.small.dict --max-cost 6000
+```
+
+페이지는 시작할 때 작은 사전(`nullime-ja.small.dict`, 약 8 MB)을 받는다. "전체 사전 받기"는 전체 사전(`nullime-ja.dict`, 약 34 MB)으로 바꾼다. 파일 선택 칸에는 같은 형식으로 직접 빌드한 사전을 넣을 수 있다.
+
 ## 실행
 
 ```sh

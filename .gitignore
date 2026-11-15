@@ -1,4 +1,7 @@
 target/
 /web/*.wasm
 /web/pkg/
+# Japanese dictionary assets are built locally (tools/nullime-dict), never committed.
+/web/assets/
+*.dict
 .DS_Store

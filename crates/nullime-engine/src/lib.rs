@@ -6,6 +6,8 @@ pub mod decode;
 pub mod engine;
 pub mod english;
 pub mod hangul;
+pub mod ja_asset;
+pub mod ja_convert;
 pub mod kanji;
 pub mod romaji;
 pub mod scorer;
@@ -67,6 +69,10 @@ pub enum Lang {
 pub struct Candidate {
     pub text: String,
     pub lang: Lang,
+    /// Conversion path cost (lower is better) when the interpreter has one;
+    /// only Japanese does today. The scorer maps it to a score.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub cost: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
