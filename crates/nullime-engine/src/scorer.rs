@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::{english, hangul, lm, Candidate, Lang, Stroke};
+use crate::{english, hangul, lm, romaji, Candidate, Lang, Stroke};
 
 /// Higher is better; scores of the segments on a path are summed.
 pub trait Scorer {
@@ -13,8 +13,8 @@ pub trait Scorer {
     /// Subtracted when a span boundary falls between two letters, i.e. inside
     /// what was typed as one word, and the path reads `prev` then `next`.
     /// May be negative: it can re-score `next` under a model for what follows
-    /// a word (a particle) in place of its `score`.
-    fn mid_word_switch_penalty(&self, prev: Lang, next: &Candidate) -> f32;
+    /// a word (a particle) in place of its `score`. `strokes` is `next`'s span.
+    fn mid_word_switch_penalty(&self, prev: Lang, strokes: &[Stroke], next: &Candidate) -> f32;
 }
 
 /// Korean and English spans score as how much likelier their language model
@@ -37,12 +37,27 @@ const KO_LONE_JAMO: f32 = -12.0;
 const EN_WORD_BONUS: f32 = 3.0;
 const PER_LETTER: f32 = 0.3;
 const JA_RANK_STEP: f32 = 0.05;
-// Japanese with a conversion cost: a per-letter gain minus the path cost.
-// Linear in cost, so a sentence split in two pays the extra BOS/EOS
-// connection costs and loses to one segment. Calibrated on the Mozc asset
-// (docs/architecture.md "점수").
-const JA_PER_LETTER: f32 = 1.0;
-const JA_COST_SCALE: f32 = 2500.0;
+// Japanese: the kana bigram's ln P of the best reading, like the other two
+// languages, plus dictionary evidence: a path cheaper than JA_COST_PER_LETTER
+// per typed letter earns (that much - cost) / JA_COST_SCALE, a dearer path
+// earns nothing: one with an unknown-word node, but also a short word in the
+// sample dictionary (の is 4300 for two letters). JA_PRIOR is what a Japanese
+// span pays to exist, and is what keeps a plausible non-word (`tokyo` ->
+// ときょ) English. Tuned on the 194-word labelled list against both
+// dictionaries (docs/architecture.md "점수").
+const JA_PRIOR: f32 = -6.0;
+const JA_COST_PER_LETTER: f32 = 1800.0;
+const JA_COST_SCALE: f32 = 500.0;
+// After English inside one run of letters a Japanese span is read as a
+// particle, like Korean: this share is any Japanese, the rest is uniform over
+// JA_PARTICLES. A particle's score is then that model's alone, without
+// JA_PRIOR or dictionary evidence, so it does not hang on what the loaded
+// dictionary charges for の (sample 4300, Mozc 1601). The switch pays
+// MID_WORD_PARTICLE on top: below 4.9 `node` -> no|で, above 5.4
+// `GitHubni` stays English.
+const JA_NON_PARTICLE: f32 = 0.001;
+const MID_WORD_PARTICLE: f32 = 5.0;
+const JA_PARTICLES: &[&str] = &["は", "が", "を", "に", "へ", "と", "で", "も", "の", "から", "まで", "より", "や", "か"];
 // Must outweigh short high-scoring pieces (the one-letter word "i"), or
 // `konnichiha` splits into こん|i|초|i|は.
 const SEGMENT_PENALTY: f32 = 1.5;
@@ -53,9 +68,6 @@ const SEGMENT_PENALTY: f32 = 1.5;
 // word into pieces that each score well alone: `Signing` -> 냐후|in|g,
 // `sushi` -> s|us|hi, `Testing` -> Test|in|g.
 const MID_WORD_SWITCH: f32 = 5.0;
-// English followed by a Japanese particle still pays something, or an
-// English-looking prefix peels off a Japanese word.
-const MID_WORD_PARTICLE: f32 = 3.0;
 // Korean after English inside one run of letters is read as a particle
 // (Kotlin|를), so it is scored as a mixture: this share of such spans is any
 // Korean text, the rest is a 조사 (lm::ko_particle). Without it a common
@@ -96,6 +108,29 @@ impl BaselineScorer {
         };
         general - after
     }
+
+    fn japanese(&self, strokes: &[Stroke], cost: i32, letters: f32) -> f32 {
+        let romaji: String = strokes.iter().map(|s| s.ch as char).collect();
+        let reading = romaji::to_hiragana(&romaji).iter().map(|r| lm::ja_reading(r)).fold(f32::MIN, f32::max);
+        reading + RANDOM_KEY * letters + JA_PRIOR + (JA_COST_PER_LETTER * letters - cost as f32).max(0.0) / JA_COST_SCALE
+    }
+
+    /// `korean_after_word` for Japanese: the span's `score` minus its score
+    /// as a particle. Particles are hiragana, so the candidate's text is its
+    /// reading.
+    fn japanese_after_word(&self, strokes: &[Stroke], next: &Candidate) -> f32 {
+        if !JA_PARTICLES.contains(&next.text.as_str()) {
+            return MID_WORD_PARTICLE - JA_NON_PARTICLE.ln();
+        }
+        let general = lm::ja_reading(&next.text);
+        let particle = (1.0 - JA_NON_PARTICLE) / JA_PARTICLES.len() as f32;
+        let after = (particle + JA_NON_PARTICLE * general.exp()).ln() + RANDOM_KEY * letters(strokes);
+        self.score(strokes, next, 0) - after + MID_WORD_PARTICLE
+    }
+}
+
+fn letters(strokes: &[Stroke]) -> f32 {
+    strokes.iter().filter(|s| s.ch.is_ascii_lowercase()).count() as f32
 }
 
 fn korean_logp(text: &str) -> f32 {
@@ -110,12 +145,12 @@ fn korean_logp(text: &str) -> f32 {
 
 impl Scorer for BaselineScorer {
     fn score(&self, strokes: &[Stroke], candidate: &Candidate, rank: usize) -> f32 {
-        let letters = strokes.iter().filter(|s| s.ch.is_ascii_lowercase()).count() as f32;
+        let letters = letters(strokes);
         match candidate.lang {
             Lang::En => self.english(&candidate.text),
             Lang::Ko => self.korean(&candidate.text, letters),
             Lang::Ja => match candidate.cost {
-                Some(cost) => JA_PER_LETTER * letters - cost as f32 / JA_COST_SCALE,
+                Some(cost) => self.japanese(strokes, cost, letters),
                 None => PER_LETTER * letters - JA_RANK_STEP * rank as f32,
             },
         }
@@ -125,10 +160,10 @@ impl Scorer for BaselineScorer {
         SEGMENT_PENALTY
     }
 
-    fn mid_word_switch_penalty(&self, prev: Lang, next: &Candidate) -> f32 {
+    fn mid_word_switch_penalty(&self, prev: Lang, strokes: &[Stroke], next: &Candidate) -> f32 {
         match (prev, next.lang) {
             (Lang::En, Lang::Ko) => self.korean_after_word(&next.text),
-            (Lang::En, Lang::Ja) => MID_WORD_PARTICLE,
+            (Lang::En, Lang::Ja) => self.japanese_after_word(strokes, next),
             (Lang::Ko, Lang::Ko) | (Lang::Ja, Lang::Ja) => 0.0,
             _ => MID_WORD_SWITCH,
         }

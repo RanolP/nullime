@@ -432,4 +432,33 @@ mod tests {
             assert_eq!(segs, [(en, Lang::En), (ko, Lang::Ko)], "{w}");
         }
     }
+
+    // Japanese scored a flat gain per letter minus the path cost, so any kana
+    // reading of an unlisted English word beat it: `api` -> あぴ, `node` ->
+    // ので, `tokyo` -> と木ょ. Real romaji must still convert.
+    #[test]
+    fn romaji_nonwords_stay_english() {
+        for w in ["api", "node", "tokyo", "engine"] {
+            let p = type_str(&mut Engine::new(), w).preedit.unwrap();
+            let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
+            assert_eq!(segs, [(w, Lang::En)], "{w}");
+        }
+        for (w, ja) in [("watashi", "私"), ("kitte", "切手"), ("toukyou", "とうきょう")] {
+            let p = type_str(&mut Engine::new(), w).preedit.unwrap();
+            let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
+            assert_eq!(segs, [(ja, Lang::Ja)], "{w}");
+        }
+    }
+
+    // The sample dictionary charges a particle more than a 2-letter span
+    // earns as dictionary evidence, so while a particle still paid JA_PRIOR
+    // `rustno` -> rust|no and `rustha` -> 견솜.
+    #[test]
+    fn particle_after_english_on_sample_dictionary() {
+        for (w, en, ja) in [("rustno", "rust", "の"), ("rustto", "rust", "と"), ("rustha", "rust", "は"), ("reactha", "react", "は")] {
+            let p = type_str(&mut Engine::new(), w).preedit.unwrap();
+            let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
+            assert_eq!(segs, [(en, Lang::En), (ja, Lang::Ja)], "{w}");
+        }
+    }
 }

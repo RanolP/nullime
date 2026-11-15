@@ -4,8 +4,8 @@
 
 Downloads the corpora into <dir> (kept out of the repository) unless they are
 already there, prints their SHA-256, and writes
-crates/nullime-engine/data/ko_syllable.bin, ko_particle.txt and
-en_trigram.bin.
+crates/nullime-engine/data/ko_syllable.bin, ko_particle.txt,
+en_trigram.bin and ja_bigram.bin.
 Standard library only.
 """
 
@@ -26,6 +26,12 @@ SOURCES = {
     "nikl_freq_2002.zip": "https://www.korean.go.kr/common/download.do?file_path=etcData"
     "&c_file_name=0907a2ca-3391-47e8-8216-8867c22add5a_0.zip&o_file_name=freq.zip",
 }
+# Mozc OSS dictionary at the commit tools/nullime-dict builds the assets from
+# (MOZC_COMMIT in src/main.rs); only the readings are used.
+MOZC_COMMIT = "a4541df29db443b49f81cf54665873b68fde9efa"
+MOZC_FILES = [f"dictionary{i:02}.txt" for i in range(10)]
+for _f in MOZC_FILES:
+    SOURCES[f"mozc_{_f}"] = f"https://raw.githubusercontent.com/google/mozc/{MOZC_COMMIT}/src/data/dictionary_oss/{_f}"
 
 # SHA-256 of the downloads the committed tables were built from. Tatoeba
 # re-exports weekly, so a fresh download differs; pass --update to accept it.
@@ -33,6 +39,16 @@ EXPECTED = {
     "kor_sentences.tsv.bz2": "453d31fcd3e0b70b113f18048d143352dc2582a5aeb5981c50eb2f0246ef652c",
     "eng_sentences.tsv.bz2": "3b5b3ecfcac5037b09f81ef048fa16fedc4d24838db5b6fbeedca1dfab374cbf",
     "nikl_freq_2002.zip": "fde8b3b47979b7f1273fa423cfe4bfb3298715d831d651ad9fae320e94193d4a",
+    "mozc_dictionary00.txt": "9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61",
+    "mozc_dictionary01.txt": "836fd5fd8399510de0d8ef7b33be913cca6bbaee7b712cc8045fba03f4c75a89",
+    "mozc_dictionary02.txt": "93943858d0cfd092b849a78def6901eaf228177e1ac5663544e865a3a1e45a9e",
+    "mozc_dictionary03.txt": "cb9f1b0b4a7550d682d86244a021cd17e0b15366328819e69135b5f183a1a24b",
+    "mozc_dictionary04.txt": "9fdc4e3948d03463de13ab5782adffbc11dd06e934cb80138c5920029cd3d2f6",
+    "mozc_dictionary05.txt": "199e3b0f050b691823ae7ba943090d437f51af6436b27c5f3dc69cafa12000e4",
+    "mozc_dictionary06.txt": "b95b14f7770ae2a824bc8e9fad8b03c1bc45c504f93a36554b8b56daa0368d2a",
+    "mozc_dictionary07.txt": "7f53649b529d4c8c495d3a8dd9c4d489dfe7696080f7423107ff01331174be48",
+    "mozc_dictionary08.txt": "50a31bb5fc1646721b00be371a5695dffab1292bda143e1e59cc70cbbdd8643f",
+    "mozc_dictionary09.txt": "4e5fcd4cbfbf11395166a37b506f547fc54d20edc0884f5184ecd3fc705f0d9a",
 }
 
 OUT = pathlib.Path(__file__).resolve().parents[2] / "crates/nullime-engine/data"
@@ -146,6 +162,24 @@ def korean(cache):
     return bytes(out)
 
 
+def witten_bell(counts, ctx_of, lower):
+    # Interpolated Witten-Bell: P = (c(h,w) + T(h) P_lower(w)) / (c(h) + T(h)).
+    ctx_total = collections.Counter()
+    ctx_types = collections.Counter()
+    for key, k in counts.items():
+        ctx_total[ctx_of(key)] += k
+        ctx_types[ctx_of(key)] += 1
+
+    def p(key):
+        h = ctx_of(key)
+        t, c = ctx_types[h], ctx_total[h]
+        if c == 0:
+            return lower(key)
+        return (counts[key] + t * lower(key)) / (c + t)
+
+    return p
+
+
 def english(cache):
     words = collections.Counter()
     for s in tatoeba_text(cache / "eng_sentences.tsv.bz2"):
@@ -166,23 +200,6 @@ def english(cache):
         uni[c] += k
     total = sum(uni.values())
 
-    def witten_bell(counts, ctx_of, lower):
-        # Interpolated Witten-Bell: P = (c(h,w) + T(h) P_lower(w)) / (c(h) + T(h)).
-        ctx_total = collections.Counter()
-        ctx_types = collections.Counter()
-        for key, k in counts.items():
-            ctx_total[ctx_of(key)] += k
-            ctx_types[ctx_of(key)] += 1
-
-        def p(key):
-            h = ctx_of(key)
-            t, c = ctx_types[h], ctx_total[h]
-            if c == 0:
-                return lower(key)
-            return (counts[key] + t * lower(key)) / (c + t)
-
-        return p
-
     def p_uni(key):
         return (uni[key[-1]] + 1) / (total + n)
 
@@ -197,6 +214,44 @@ def english(cache):
     return bytes(out)
 
 
+def japanese(cache):
+    """Kana bigram over the distinct readings of the Mozc dictionary.
+
+    Symbols are the hiragana block ぁ..ん (U+3041..U+3093) and the word
+    boundary. Readings holding anything else (ー, ゔ, digits) are skipped: the
+    romaji interpreter never produces those. Each reading counts once, like an
+    English word type; Mozc costs are not frequencies."""
+    first, last = 0x3041, 0x3093
+    boundary = last - first + 1
+    n = boundary + 1
+    readings = set()
+    for name in MOZC_FILES:
+        with open(cache / f"mozc_{name}", encoding="utf-8") as f:
+            for line in f:
+                r = line.split("\t", 1)[0]
+                if r and all(first <= ord(c) <= last for c in r):
+                    readings.add(r)
+    bi = collections.Counter()
+    uni = collections.Counter()
+    for r in readings:
+        seq = [boundary] + [ord(c) - first for c in r] + [boundary]
+        for a, b in zip(seq, seq[1:]):
+            bi[(a, b)] += 1
+            uni[b] += 1
+    total = sum(uni.values())
+
+    def p_uni(key):
+        return (uni[key[-1]] + 1) / (total + n)
+
+    p_bi = witten_bell(bi, lambda k: k[0], p_uni)
+    out = bytearray()
+    for a in range(n):
+        for b in range(n):
+            out.append(min(255, round(-math.log(p_bi((a, b))) * SCALE)))
+    print(f"ja: {len(readings)} distinct readings, {total} bigrams")
+    return bytes(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", type=pathlib.Path, required=True)
@@ -208,6 +263,7 @@ def main():
         ("ko_syllable.bin", korean(args.cache)),
         ("ko_particle.txt", particles(args.cache / "nikl_freq_2002.zip")),
         ("en_trigram.bin", english(args.cache)),
+        ("ja_bigram.bin", japanese(args.cache)),
     ]
     for name, data in tables:
         (OUT / name).write_bytes(data)

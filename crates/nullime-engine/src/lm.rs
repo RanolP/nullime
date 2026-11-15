@@ -1,7 +1,8 @@
-//! Embedded language models that make Korean and English spans comparable:
-//! a Hangul syllable unigram, a Korean particle unigram and an English letter
-//! trigram, all natural-log probabilities. Tables come from `tools/nullime-dict/gen_lm.py`; sources and
-//! licenses are in docs/architecture.md "언어 모델" and NOTICE.
+//! Embedded language models that make Korean, English and Japanese spans
+//! comparable: a Hangul syllable unigram, a Korean particle unigram, an
+//! English letter trigram and a kana bigram, all natural-log probabilities.
+//! Tables come from `tools/nullime-dict/gen_lm.py`; sources and licenses are
+//! in docs/architecture.md "언어 모델" and NOTICE.
 
 use crate::hangul;
 
@@ -18,6 +19,13 @@ static EN_TRIGRAM: &[u8; 19683] = include_bytes!("../data/en_trigram.bin");
 static KO_PARTICLE: &str = include_str!("../data/ko_particle.txt");
 
 const BOUNDARY: usize = 26;
+
+/// Kana symbols are ぁ..ん (U+3041..U+3093), then the word boundary.
+const KANA_FIRST: u32 = 0x3041;
+const KANA_BOUNDARY: usize = 0x3093 - 0x3041 + 1;
+const KANA_SYMBOLS: usize = KANA_BOUNDARY + 1;
+/// `JA_BIGRAM[a * KANA_SYMBOLS + b]` is P(b | a).
+static JA_BIGRAM: &[u8; KANA_SYMBOLS * KANA_SYMBOLS] = include_bytes!("../data/ja_bigram.bin");
 
 fn one_particle(s: &str) -> Option<f32> {
     KO_PARTICLE.lines().find_map(|l| {
@@ -45,6 +53,22 @@ pub fn en_word(word: &str) -> f32 {
     for c in word.bytes().map(|c| (c.to_ascii_lowercase() - b'a') as usize).chain([BOUNDARY]) {
         cost += EN_TRIGRAM[(a * 27 + b) * 27 + c] as u32;
         (a, b) = (b, c);
+    }
+    -(cost as f32) / SCALE
+}
+
+/// ln P of a hiragana reading, boundaries included. Runs of other characters
+/// (the digits and punctuation romaji passes through) split it into words
+/// and score 0, as in `en_word`'s callers.
+pub fn ja_reading(reading: &str) -> f32 {
+    let mut cost = 0u32;
+    let mut prev = None;
+    for c in reading.chars().map(|c| (c as u32).checked_sub(KANA_FIRST).filter(|&i| (i as usize) < KANA_BOUNDARY)).chain([None]) {
+        match (prev, c) {
+            (None, None) => {}
+            (p, c) => cost += JA_BIGRAM[p.map_or(KANA_BOUNDARY, |p| p as usize) * KANA_SYMBOLS + c.map_or(KANA_BOUNDARY, |c| c as usize)] as u32,
+        }
+        prev = c;
     }
     -(cost as f32) / SCALE
 }

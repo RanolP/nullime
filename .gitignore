@@ -5,3 +5,4 @@ target/
 /web/assets/
 *.dict
 .DS_Store
+__pycache__/

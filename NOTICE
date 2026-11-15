@@ -8,12 +8,18 @@ redistributing a built asset redistributes that data under the notices
 below; each asset also carries the dictionary's README.txt notices in its
 license section.
 
-The engine embeds three language-model tables,
-crates/nullime-engine/data/ko_syllable.bin, ko_particle.txt and
-en_trigram.bin, built by
+The engine embeds four language-model tables,
+crates/nullime-engine/data/ko_syllable.bin, ko_particle.txt,
+en_trigram.bin and ja_bigram.bin, built by
 tools/nullime-dict/gen_lm.py from the sources below. They hold quantized
 frequency statistics; ko_particle.txt also lists the particle forms from
 the survey's 조사 list. No sentences from the sources are included.
+
+ja_bigram.bin is a hiragana bigram derived from the readings in the Mozc
+dictionary above (src/data/dictionary_oss/dictionary00.txt to
+dictionary09.txt, same commit), under the Mozc, IPAdic and Okinawa
+dictionary notices below. It holds no entries, only quantized
+reading-bigram statistics.
 
 ===============================================================================
 Tatoeba (https://tatoeba.org)
