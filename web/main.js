@@ -126,6 +126,7 @@ function editAction(code, ctrl, shift) {
     case 'Ctrl+Backspace': return () => deleteTo(prevWord(caret));
     case 'Ctrl+Delete': return () => deleteTo(nextWord(caret));
     case 'Delete': return () => deleteTo(Math.min(chars.length, caret + 1));
+    case 'Ctrl+KeyC': case 'Ctrl+KeyX': return selRange() ? () => copySelection(code === 'KeyX') : null;
   }
   return null;
 }
@@ -239,9 +240,107 @@ editor.addEventListener('blur', () => {
   if (engine && preedit) handle(engine.reset(), KEY.Other);
 });
 
-editor.addEventListener('mousedown', () => setTimeout(() => editor.focus(), 0));
+// Number of code points in `chars` before DOM point (node, offset); preedit and candidate text do not count.
+function indexOfPoint(node, offset) {
+  const point = document.createRange();
+  point.setStart(node, offset);
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, {
+    acceptNode: (t) => (t.parentElement.closest('.seg, #cands') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  let n = 0;
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (t === node) return n + Array.from(t.data.slice(0, offset)).length;
+    if (point.comparePoint(t, 0) >= 0) break; // t starts at or after the point
+    n += Array.from(t.data).length;
+  }
+  return n;
+}
 
-// The editor is not contenteditable, so clipboard events target <body>; take them while it has focus.
+// chars index under the viewport point, clamped into the editor so a drag past its edge still selects.
+function indexAt(x, y) {
+  const r = editor.getBoundingClientRect();
+  x = Math.min(Math.max(x, r.left + 1), r.right - 1);
+  y = Math.min(Math.max(y, r.top + 1), r.bottom - 1);
+  let node = null, offset = 0;
+  if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (p) [node, offset] = [p.offsetNode, p.offset];
+  } else if (document.caretRangeFromPoint) {
+    const p = document.caretRangeFromPoint(x, y);
+    if (p) [node, offset] = [p.startContainer, p.startOffset];
+  }
+  if (!node || !editor.contains(node)) return y < r.top + r.height / 2 ? 0 : chars.length;
+  return indexOfPoint(node, offset);
+}
+
+// [start, end) of the run of same-class characters around boundary i. Hit-testing snaps to the
+// nearest boundary, so a click on the right half of a word's last letter lands after it: prefer
+// the side that is a word (class 1), then a symbol over whitespace.
+function wordAt(i) {
+  if (chars.length === 0) return [0, 0];
+  const left = i > 0 ? charClass(chars[i - 1]) : -1;
+  const right = i < chars.length ? charClass(chars[i]) : -1;
+  const c = right === 1 || left === -1 ? right : left === 1 || right === -1 || right === 0 ? left : right;
+  let [a, b] = [i, i];
+  while (a > 0 && charClass(chars[a - 1]) === c) a--;
+  while (b < chars.length && charClass(chars[b]) === c) b++;
+  return [a, b];
+}
+
+let dragging = false;
+
+// The model owns the selection: the native one is suppressed so the two never disagree.
+editor.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  editor.focus();
+  if (e.target.closest('#cands')) return;
+  // Commit the composition exactly as blur does, then hit-test the re-rendered text.
+  if (engine && preedit) handle(engine.reset(), KEY.Other);
+  const i = indexAt(e.clientX, e.clientY);
+  if (e.detail === 2) {
+    [anchor, caret] = wordAt(i);
+  } else if (e.shiftKey) {
+    anchor ??= caret;
+    caret = i;
+    dragging = true;
+  } else {
+    anchor = caret = i;
+    dragging = true;
+  }
+  render();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  // A release outside the window never reaches mouseup; hovering must not keep extending.
+  if (!(e.buttons & 1)) { dragging = false; return; }
+  const i = indexAt(e.clientX, e.clientY);
+  if (i === caret) return;
+  caret = i;
+  render();
+});
+
+document.addEventListener('mouseup', () => { dragging = false; });
+
+// Ctrl+C/X write the clipboard directly: the editor holds no native selection, so the browser's
+// own copy/cut may count as disabled and never fire the events below.
+// Cut deletes only once the write succeeded, and only if the selection is still the one copied.
+function copySelection(cut) {
+  const r = selRange();
+  const text = chars.slice(r[0], r[1]).join('');
+  // navigator.clipboard exists only in secure contexts (https, localhost).
+  const write = navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('navigator.clipboard 없음'));
+  write.then(() => {
+    const now = selRange();
+    if (cut && now && now[0] === r[0] && now[1] === r[1]) { deleteSelection(); render(); }
+  }, (err) => {
+    console.error(err);
+    statusEl.textContent = `클립보드에 쓰지 못했다: ${err.message ?? err}`;
+  });
+}
+
+// Menu-triggered copy/cut. The editor is not contenteditable, so clipboard events target <body>; take them while it has focus.
 function onCopy(e, cut) {
   const r = selRange();
   if (document.activeElement !== editor || !r) return;
