@@ -129,7 +129,7 @@ impl Lattice {
                     }
                     for prev in &self.nodes[start] {
                         let switch = match prev.lang {
-                            Some(p) if mid => scorer.mid_word_switch_penalty(p, cand.lang),
+                            Some(p) if mid => scorer.mid_word_switch_penalty(p, cand),
                             _ => 0.0,
                         };
                         let total = prev.best + score - scorer.segment_penalty() - switch;

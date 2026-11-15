@@ -180,30 +180,29 @@ pub fn compose(strokes: &[Stroke]) -> String {
     out
 }
 
-/// Stand-in Korean word list for the baseline scorer; the real language
-/// model is undecided (D7).
-pub const SAMPLE_WORDS: &[&str] = &[
-    "안녕", "안녕하세요", "정도", "사람", "한국", "한국어", "일본", "일본어", "영어", "사랑", "감사",
-    "감사합니다", "오늘", "내일", "어제", "시간", "생각", "문제", "사용", "입력", "입력기", "우리",
-    "나라", "학교", "친구", "회사", "컴퓨터", "프로그램", "자판", "한글", "가나", "간", "글자", "말",
-    "물", "밥", "집", "네", "아니요", "그리고", "하지만", "그래서", "지금", "여기", "저기", "무엇",
-    "누구", "어디", "언제", "왜", "어떻게", "있다", "없다", "하다", "되다", "같다", "많이", "조금",
-    "정말", "진짜", "좋아", "좋다", "세상", "공부", "대학교", "선생님", "학생", "가족", "음식",
-];
-
 pub fn is_lone_jamo(c: char) -> bool {
     ('\u{3131}'..='\u{3163}').contains(&c)
 }
 
-/// True for a precomposed syllable outside the 2350 of KS X 1001, the set
-/// everyday Korean text stays within. 두벌식 readings of English words land
-/// outside it (`authorize` -> 며쇄걐ㄷ).
-pub fn is_rare_syllable(c: char) -> bool {
-    let Some(i) = (c as u32).checked_sub(0xAC00).filter(|&i| i < 11172) else {
-        return false;
-    };
-    KS_X_1001[i as usize / 64] & (1 << (i % 64)) == 0
+/// Position of a precomposed syllable among the 2350 of KS X 1001 (code point
+/// order), the set everyday Korean text stays within; `None` outside it.
+/// 두벌식 readings of English words land outside it (`authorize` -> 며쇄걐ㄷ).
+pub fn ks_x_1001_index(c: char) -> Option<usize> {
+    let i = (c as u32).checked_sub(0xAC00).filter(|&i| i < 11172)? as usize;
+    let (word, bit) = (KS_X_1001[i / 64], 1u64 << (i % 64));
+    (word & bit != 0).then(|| KS_RANK[i / 64] as usize + (word & (bit - 1)).count_ones() as usize)
 }
+
+/// Set bits in `KS_X_1001` before each word.
+const KS_RANK: [u16; 175] = {
+    let mut rank = [0; 175];
+    let mut i = 1;
+    while i < 175 {
+        rank[i] = rank[i - 1] + KS_X_1001[i - 1].count_ones() as u16;
+        i += 1;
+    }
+    rank
+};
 
 /// Bit `i` set when U+AC00+i is in KS X 1001. Generated with Python's
 /// `euc_kr` codec: a syllable is in the set when it encodes to 2 bytes.

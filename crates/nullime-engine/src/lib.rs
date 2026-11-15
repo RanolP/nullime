@@ -9,6 +9,7 @@ pub mod hangul;
 pub mod ja_asset;
 pub mod ja_convert;
 pub mod kanji;
+pub mod lm;
 pub mod romaji;
 pub mod scorer;
 

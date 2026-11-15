@@ -412,4 +412,24 @@ mod tests {
             assert_eq!(segs, [(w, Lang::En)], "{w}");
         }
     }
+
+    // Words outside the English list read as Korean keys (`author` -> 며쇅,
+    // `git` -> 햣) and an unlisted word kept its particle as letters
+    // (`Kotlinfmf`), until the letter trigram scored them; a common syllable
+    // then peeled off a weak English word (`http` -> ht|세) until Korean after
+    // English letters was scored as a particle.
+    #[test]
+    fn unlisted_english_stays_english_and_splits_its_particle() {
+        let e = Engine::new;
+        for w in ["author", "authorization", "authorize", "optimize", "git", "npm", "vim", "rust", "cargo", "json", "http", "https", "behind", "hardly", "parking", "deadline"] {
+            let p = type_str(&mut e(), w).preedit.unwrap();
+            let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
+            assert_eq!(segs, [(w, Lang::En)], "{w}");
+        }
+        for (w, en, ko) in [("Kotlinfmf", "Kotlin", "를"), ("Pythondms", "Python", "은")] {
+            let p = type_str(&mut e(), w).preedit.unwrap();
+            let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
+            assert_eq!(segs, [(en, Lang::En), (ko, Lang::Ko)], "{w}");
+        }
+    }
 }

@@ -8,6 +8,38 @@ redistributing a built asset redistributes that data under the notices
 below; each asset also carries the dictionary's README.txt notices in its
 license section.
 
+The engine embeds three language-model tables,
+crates/nullime-engine/data/ko_syllable.bin, ko_particle.txt and
+en_trigram.bin, built by
+tools/nullime-dict/gen_lm.py from the sources below. They hold quantized
+frequency statistics; ko_particle.txt also lists the particle forms from
+the survey's 조사 list. No sentences from the sources are included.
+
+===============================================================================
+Tatoeba (https://tatoeba.org)
+
+ko_syllable.bin and en_trigram.bin are derived from Tatoeba's Korean and
+English sentence exports
+(https://downloads.tatoeba.org/exports/per_language/kor/kor_sentences.tsv.bz2,
+https://downloads.tatoeba.org/exports/per_language/eng/eng_sentences.tsv.bz2).
+Sentences by Tatoeba (https://tatoeba.org) contributors, licensed under
+Creative Commons Attribution 2.0 France (CC BY 2.0 FR,
+https://creativecommons.org/licenses/by/2.0/fr/). The tables are a
+modified (statistically derived) form of that work.
+
+===============================================================================
+국립국어원 「현대 국어 사용 빈도 조사」 결과 파일 (2002)
+
+ko_syllable.bin and ko_particle.txt are derived from the National Institute of Korean
+Language's 2002 frequency survey result files
+(https://www.korean.go.kr/front/etcData/etcDataView.do?mn_id=46&etc_seq=61).
+
+출처: 국립국어원, 「현대 국어 사용 빈도 조사」 결과 파일(텍스트 파일), 2002.
+이 저작물은 공공누리 제1유형(출처표시)에 따라 이용하였습니다.
+(https://www.kogl.or.kr/info/licenseType1.do)
+음절 빈도는 원자료의 단어·조사·어미·고유명사 빈도에서, 조사 빈도는 원자료의
+조사 빈도에서 가공하여 산출한 것이다.
+
 ===============================================================================
 Mozc (https://github.com/google/mozc/blob/a4541df29db443b49f81cf54665873b68fde9efa/LICENSE)
 
