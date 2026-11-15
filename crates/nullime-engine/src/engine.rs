@@ -400,4 +400,16 @@ mod tests {
         let r = e.key(KeyEvent { key: Key::Char(b'c'), shift: false, modifier: true });
         assert_eq!(r, Response { handled: false, commit: "hello".into(), preedit: None });
     }
+
+    // Catches a clean Hangul or kana prefix carving up an English word the
+    // word list lacks: `Signing` came out as 냐후|in|g, `foo` as 래ㅐ, and
+    // `authorized` as 며쇄걐ㄷㅇ.
+    #[test]
+    fn signing_stays_english() {
+        for w in ["Signing", "signing", "Design", "Singing", "foo", "bar", "authorized"] {
+            let p = type_str(&mut Engine::new(), w).preedit.unwrap();
+            let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
+            assert_eq!(segs, [(w, Lang::En)], "{w}");
+        }
+    }
 }

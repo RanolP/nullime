@@ -3,7 +3,7 @@
 
 use crate::english::EnglishInterpreter;
 use crate::scorer::Scorer;
-use crate::{Candidate, Interpreter, Stroke};
+use crate::{Candidate, Interpreter, Lang, Stroke};
 
 /// Longest span one segment may cover. Bounds decoding to O(n * MAX_SPAN)
 /// spans; longer input simply becomes several segments.
@@ -18,7 +18,7 @@ pub struct Span {
     /// Stroke range relative to the slice given to `decode`.
     pub start: usize,
     pub end: usize,
-    /// Every language's candidates for this span, best first; never empty.
+    /// Every language's candidates for this span: the path's reading first, the rest best first; never empty.
     pub candidates: Vec<Candidate>,
 }
 
@@ -58,26 +58,41 @@ pub fn candidates(
     out
 }
 
-/// Best path ending at one stroke position.
+/// Best path ending at one stroke position whose last span reads as `lang`.
 struct Node {
     best: f32,
-    /// Start of the last span on that path, and that span's candidates.
+    /// Start of the last span on that path, and that span's candidates with
+    /// the one this path reads first.
     start: usize,
     candidates: Vec<Candidate>,
+    /// Language of the last span; `None` only for the empty path at 0.
+    lang: Option<Lang>,
+    /// `lang` of the node at `start` this path came from.
+    prev: Option<Lang>,
 }
 
 /// Incremental DP over a growing stroke sequence. The best path to position
 /// `j` depends only on `strokes[..j]`, so appending a stroke computes one new
-/// node (at most `MAX_SPAN` spans) and Backspace just drops the last node.
+/// position (at most `MAX_SPAN` spans) and Backspace just drops the last one.
+/// Each position keeps the best path per last-span language, because the
+/// cost of the next span depends on the language it switches from.
 pub struct Lattice {
-    /// `nodes[j]` is the best path covering `strokes[..j]`; `nodes[0]` is empty.
-    nodes: Vec<Node>,
+    /// `nodes[j]` holds the best paths covering `strokes[..j]`, at most one
+    /// per language; `nodes[0]` is the empty path.
+    nodes: Vec<Vec<Node>>,
 }
 
 impl Default for Lattice {
     fn default() -> Self {
-        Lattice { nodes: vec![Node { best: 0.0, start: 0, candidates: Vec::new() }] }
+        let empty = Node { best: 0.0, start: 0, candidates: Vec::new(), lang: None, prev: None };
+        Lattice { nodes: vec![vec![empty]] }
     }
+}
+
+/// True when a span starting at `at` would cut a run of letters, i.e. split
+/// what is typed as one word.
+fn mid_word(strokes: &[Stroke], at: usize) -> bool {
+    at > 0 && strokes[at - 1].ch.is_ascii_lowercase() && strokes[at].ch.is_ascii_lowercase()
 }
 
 impl Lattice {
@@ -103,19 +118,44 @@ impl Lattice {
         scorer: &dyn Scorer,
     ) {
         for end in self.len() + 1..=strokes.len() {
-            let mut best: Option<Node> = None;
+            let mut best: Vec<Node> = Vec::new();
             for start in end.saturating_sub(MAX_SPAN)..end {
                 let cands = candidates(&strokes[start..end], interpreters, scorer);
-                let total = self.nodes[start].best + cands[0].1 - scorer.segment_penalty();
-                if best.as_ref().is_none_or(|b| total > b.best) {
-                    best = Some(Node {
-                        best: total,
-                        start,
-                        candidates: cands.into_iter().map(|(c, _)| c).collect(),
-                    });
+                let mid = mid_word(strokes, start);
+                for (i, (cand, score)) in cands.iter().enumerate() {
+                    // Only each language's best candidate can start a best path.
+                    if cands[..i].iter().any(|(c, _)| c.lang == cand.lang) {
+                        continue;
+                    }
+                    for prev in &self.nodes[start] {
+                        let switch = match prev.lang {
+                            Some(p) if mid => scorer.mid_word_switch_penalty(p, cand.lang),
+                            _ => 0.0,
+                        };
+                        let total = prev.best + score - scorer.segment_penalty() - switch;
+                        let slot = best.iter().position(|n| n.lang == Some(cand.lang));
+                        if slot.is_some_and(|k| total <= best[k].best) {
+                            continue;
+                        }
+                        // The path's reading goes first; the rest keep score order.
+                        let mut ordered: Vec<Candidate> = cands.iter().map(|(c, _)| c.clone()).collect();
+                        ordered[..=i].rotate_right(1);
+                        let node = Node {
+                            best: total,
+                            start,
+                            candidates: ordered,
+                            lang: Some(cand.lang),
+                            prev: prev.lang,
+                        };
+                        match slot {
+                            Some(k) => best[k] = node,
+                            None => best.push(node),
+                        }
+                    }
                 }
             }
-            self.nodes.push(best.expect("end > start, so at least one span"));
+            assert!(!best.is_empty(), "end > start and candidates are never empty");
+            self.nodes.push(best);
         }
     }
 
@@ -123,10 +163,17 @@ impl Lattice {
     pub fn spans(&self) -> Vec<Span> {
         let mut spans = Vec::new();
         let mut end = self.len();
+        // First of equals, so ties keep the order nodes were found in.
+        let Some(mut node) =
+            self.nodes[end].iter().reduce(|a, b| if b.best > a.best { b } else { a })
+        else {
+            return spans;
+        };
         while end > 0 {
-            let node = &self.nodes[end];
             spans.push(Span { start: node.start, end, candidates: node.candidates.clone() });
             end = node.start;
+            let prev = node.prev;
+            node = self.nodes[end].iter().find(|n| n.lang == prev).expect("path's previous node");
         }
         spans.reverse();
         spans
