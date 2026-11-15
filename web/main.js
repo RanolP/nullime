@@ -15,6 +15,11 @@ const NAMED = {
   ArrowLeft: KEY.Left, ArrowRight: KEY.Right, ArrowUp: KEY.Up, ArrowDown: KEY.Down,
 };
 
+const BARE_MODIFIERS = new Set([
+  'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
+  'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'CapsLock',
+]);
+
 /** KeyboardEvent -> [key, ch, shift, modifier] */
 function mapKey(e) {
   const modifier = e.ctrlKey || e.altKey || e.metaKey;
@@ -106,7 +111,7 @@ function handle(res, key) {
 }
 
 editor.addEventListener('keydown', (e) => {
-  if (!engine) return;
+  if (!engine || BARE_MODIFIERS.has(e.code)) return; // bare modifier presses must not flush the composition
   const [key, ch, shift, modifier] = mapKey(e);
   const res = engine.key(key, ch, shift, modifier);
   // Modifier combos and unmapped keys (Ctrl+R, F5, Tab, ...) keep the browser default;

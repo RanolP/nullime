@@ -1,6 +1,6 @@
 //! Per-key state machine (docs/architecture.md "키별 동작").
 
-use crate::decode::decode;
+use crate::decode::Lattice;
 use crate::english::EnglishInterpreter;
 use crate::hangul::HangulInterpreter;
 use crate::kanji::SampleDictionary;
@@ -22,6 +22,11 @@ pub struct Engine {
     strokes: Vec<Stroke>,
     segs: Vec<Seg>,
     focused: usize,
+    /// DP over `strokes[lattice_from..]`, the part after the last pinned
+    /// segment; kept across keys so a keystroke only decodes the spans that
+    /// end at it.
+    lattice: Lattice,
+    lattice_from: usize,
     interpreters: Vec<Box<dyn Interpreter>>,
     scorer: Box<dyn Scorer>,
 }
@@ -46,7 +51,15 @@ impl Engine {
 
     /// Swap in other interpreters or a different scorer (D7).
     pub fn with_parts(interpreters: Vec<Box<dyn Interpreter>>, scorer: Box<dyn Scorer>) -> Engine {
-        Engine { strokes: Vec::new(), segs: Vec::new(), focused: 0, interpreters, scorer }
+        Engine {
+            strokes: Vec::new(),
+            segs: Vec::new(),
+            focused: 0,
+            lattice: Lattice::default(),
+            lattice_from: 0,
+            interpreters,
+            scorer,
+        }
     }
 
     pub fn key(&mut self, ev: KeyEvent) -> Response {
@@ -69,6 +82,7 @@ impl Engine {
                 self.strokes.pop();
                 let len = self.strokes.len();
                 self.segs.retain(|s| s.end <= len);
+                self.lattice.truncate(len.saturating_sub(self.lattice_from));
                 if len == 0 {
                     self.focused = 0;
                     return Response { handled: true, commit: String::new(), preedit: None };
@@ -108,6 +122,8 @@ impl Engine {
         self.strokes.clear();
         self.segs.clear();
         self.focused = 0;
+        self.lattice = Lattice::default();
+        self.lattice_from = 0;
         Response { handled: false, commit, preedit: None }
     }
 
@@ -116,7 +132,14 @@ impl Engine {
         let keep = self.segs.iter().rposition(|s| s.pinned).map_or(0, |i| i + 1);
         self.segs.truncate(keep);
         let from = self.segs.last().map_or(0, |s| s.end);
-        let spans = decode(&self.strokes[from..], &self.interpreters, self.scorer.as_ref());
+        if from != self.lattice_from {
+            self.lattice = Lattice::default();
+            self.lattice_from = from;
+        }
+        let tail = &self.strokes[from..];
+        self.lattice.truncate(self.lattice.len().min(tail.len()));
+        self.lattice.extend(tail, &self.interpreters, self.scorer.as_ref());
+        let spans = self.lattice.spans();
         self.segs.extend(spans.into_iter().map(|span| Seg {
             start: from + span.start,
             end: from + span.end,
@@ -319,6 +342,37 @@ mod tests {
         let p = r.preedit.unwrap();
         assert_eq!(p.segments[0].selected, 0);
         assert_eq!(preedit_text_of(&p), "안녀");
+    }
+
+    // Catches the incremental lattice drifting from a fresh decode after edits and Backspace.
+    #[test]
+    fn incremental_matches_full_decode() {
+        let mut e = Engine::new();
+        type_str(&mut e, "0.1mmwjdehkonnichiha");
+        for _ in 0..4 {
+            press(&mut e, Key::Backspace);
+        }
+        type_str(&mut e, "sakedkssud");
+        press(&mut e, Key::Backspace);
+        type_str(&mut e, "Qk");
+        let full = crate::decode::decode(&e.strokes, &e.interpreters, e.scorer.as_ref());
+        let got: Vec<_> = e.segs.iter().map(|s| (s.start, s.end, s.candidates.clone())).collect();
+        let want: Vec<_> = full.into_iter().map(|s| (s.start, s.end, s.candidates)).collect();
+        assert_eq!(got, want);
+    }
+
+    // Catches a panic (host app abort) when no interpreter reads a span.
+    #[test]
+    fn unreadable_span_falls_back_to_literal() {
+        let mut e = Engine::with_parts(
+            vec![Box::new(JapaneseInterpreter { dictionary: SampleDictionary })],
+            Box::new(BaselineScorer::default()),
+        );
+        let r = press(&mut e, Key::Char(b'k'));
+        assert_eq!(preedit_text(&r), "k");
+        press(&mut e, Key::Down);
+        let r = press(&mut e, Key::Up);
+        assert_eq!(preedit_text(&r), "k");
     }
 
     fn preedit_text_of(p: &Preedit) -> String {

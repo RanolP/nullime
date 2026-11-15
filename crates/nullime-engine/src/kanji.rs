@@ -1,8 +1,9 @@
 //! Reading (hiragana) to kanji lookup.
 
 pub trait Dictionary {
-    /// Kanji spellings for a hiragana reading, most common first.
-    fn lookup(&self, reading: &str) -> &[&'static str];
+    /// Kanji spellings for a hiragana reading, most common first. Borrows
+    /// from `self` so a dictionary loaded at runtime can hand out its strings.
+    fn lookup(&self, reading: &str) -> Vec<&str>;
 }
 
 /// STAND-IN: a tiny hand-written sample so kanji conversion works end to end.
@@ -93,7 +94,7 @@ const SAMPLE: &[(&str, &[&str])] = &[
 ];
 
 impl Dictionary for SampleDictionary {
-    fn lookup(&self, reading: &str) -> &[&'static str] {
-        SAMPLE.iter().find(|(r, _)| *r == reading).map_or(&[], |(_, k)| k)
+    fn lookup(&self, reading: &str) -> Vec<&str> {
+        SAMPLE.iter().find(|(r, _)| *r == reading).map_or(Vec::new(), |(_, k)| k.to_vec())
     }
 }

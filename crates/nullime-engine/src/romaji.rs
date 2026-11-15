@@ -166,7 +166,7 @@ impl<D: Dictionary> Interpreter for JapaneseInterpreter<D> {
         let ja = |text: String| Candidate { text, lang: Lang::Ja };
         let mut out: Vec<Candidate> = readings.iter().cloned().map(ja).collect();
         for reading in &readings {
-            out.extend(self.dictionary.lookup(reading).iter().map(|k| ja(k.to_string())));
+            out.extend(self.dictionary.lookup(reading).into_iter().map(|k| ja(k.to_string())));
         }
         out.extend(readings.iter().map(|r| ja(to_katakana(r))));
         out.dedup();

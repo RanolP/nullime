@@ -75,6 +75,9 @@ pub struct Candidate { pub text: String, pub lang: Lang }
 - 사용자가 상하 화살표로 고른 칸은 고정된다. 이후 키 입력은 마지막 고정 칸 뒤 구간만 다시 해석한다. 백스페이스가 고정 칸 안으로 들어가면 그 칸의 고정을 푼다.
 - 마지막 고정 칸 앞에 있는 고정되지 않은 칸도 다시 해석하지 않는다. 마지막 고정 칸까지가 통째로 굳는다.
 - 한 칸은 최대 32 키 입력이다 (`decode::MAX_SPAN`).
+- 해석은 점진적이다 (`decode::Lattice`). 위치 j까지의 최고 경로는 `keys[..j]`에만 달려 있으므로, 키 하나를 더하면 그 키에서 끝나는 구간(최대 32개)만 계산하고 백스페이스는 마지막 노드를 버린다. 고정 칸이 바뀌어 다시 해석할 시작점이 달라지면 그 뒤를 새로 계산한다. 결과는 매번 처음부터 해석한 것과 같다.
+- 어떤 해석기도 읽지 못한 구간은 키를 입력한 그대로(`En`) 낮은 점수(키당 -10)의 후보 하나로 둔다. 그래서 모든 칸은 후보가 하나 이상이다.
+- `kanji::Dictionary::lookup(&self, reading) -> Vec<&str>`는 `self`에서 빌린 문자열을 돌려준다. 실행 중에 읽어 들인 사전도 구현할 수 있다.
 - 교체 지점: `Interpreter`(구간 → 후보, 언어별 선호 순서), `Scorer`(`score(strokes, candidate, rank)`와 `segment_penalty()`), `kanji::Dictionary`(읽기 → 한자). `Engine::with_parts(interpreters, scorer)`로 갈아 끼운다.
 
 ## 엔진 API

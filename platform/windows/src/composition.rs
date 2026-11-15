@@ -8,7 +8,7 @@ use windows::Win32::Foundation::RECT;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::TextServices::{
     ITfComposition, ITfCompositionSink, ITfContext, ITfContextComposition, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection, ITfRange, INSERT_TEXT_AT_SELECTION_FLAGS,
-    GUID_PROP_ATTRIBUTE, TF_AE_NONE, TF_ANCHOR_END, TF_ANCHOR_START, TF_ES_ASYNCDONTCARE, TF_ES_READWRITE, TF_ES_SYNC, TF_E_SYNCHRONOUS,
+    GUID_PROP_ATTRIBUTE, TF_AE_NONE, TF_ANCHOR_END, TF_ANCHOR_START, TF_ES_ASYNCDONTCARE, TF_ES_READWRITE, TF_ES_SYNC, TF_E_LOCKED, TF_E_SYNCHRONOUS,
     TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 
@@ -36,22 +36,27 @@ impl ITfEditSession_Impl for ApplyResponse_Impl {
     }
 }
 
-/// `sync` is only granted inside key handling; elsewhere TSF answers
-/// TF_E_SYNCHRONOUS and the session is queued instead.
+/// `sync` is only granted inside key handling; elsewhere TSF refuses it and the
+/// session is queued instead.
+///
+/// The Ok value of RequestEditSession is phrSession: a refused lock arrives as
+/// Ok(TF_E_SYNCHRONOUS / TF_E_LOCKED), not as Err.
 pub fn request(service: ComObject<TextService>, sink: ITfCompositionSink, client_id: u32, context: &ITfContext, response: Response, sync: bool) {
     let session: ITfEditSession = ApplyResponse { service, sink, context: context.clone(), response }.into();
     if sync {
         match unsafe { context.RequestEditSession(client_id, &session, TF_ES_READWRITE | TF_ES_SYNC) } {
+            Ok(hr) if hr == TF_E_SYNCHRONOUS || hr == TF_E_LOCKED => {}
             Ok(_) => return,
-            Err(e) if e.code() == TF_E_SYNCHRONOUS => {}
             Err(e) => {
                 log(&format!("sync RequestEditSession: {e}"));
                 return;
             }
         }
     }
-    if let Err(e) = unsafe { context.RequestEditSession(client_id, &session, TF_ES_READWRITE | TF_ES_ASYNCDONTCARE) } {
-        log(&format!("RequestEditSession: {e}"));
+    match unsafe { context.RequestEditSession(client_id, &session, TF_ES_READWRITE | TF_ES_ASYNCDONTCARE) } {
+        Ok(hr) if hr.is_err() => log(&format!("async RequestEditSession refused: {hr:?}")),
+        Ok(_) => {}
+        Err(e) => log(&format!("async RequestEditSession: {e}")),
     }
 }
 
