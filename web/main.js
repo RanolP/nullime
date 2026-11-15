@@ -36,13 +36,98 @@ const debugEl = document.getElementById('debug');
 
 let chars = []; // committed text, one entry per code point
 let caret = 0;  // index into chars
+let anchor = null; // other end of the selection; null when nothing is selected
 let preedit = null;
 let engine = null;
 
+/** [start, end) of the selection, or null when it is empty. */
+function selRange() {
+  if (anchor === null || anchor === caret) return null;
+  return [Math.min(anchor, caret), Math.max(anchor, caret)];
+}
+
+/** Removes the selected text; returns whether there was any. */
+function deleteSelection() {
+  const r = selRange();
+  anchor = null;
+  if (!r) return false;
+  chars.splice(r[0], r[1] - r[0]);
+  caret = r[0];
+  return true;
+}
+
 function insert(text) {
+  deleteSelection();
   const add = Array.from(text);
   chars.splice(caret, 0, ...add);
   caret += add.length;
+}
+
+/** Deletes the selection if any, else the text between the caret and `target`. */
+function deleteTo(target) {
+  if (deleteSelection()) return;
+  const [a, b] = [Math.min(caret, target), Math.max(caret, target)];
+  chars.splice(a, b - a);
+  caret = a;
+}
+
+// Word boundaries: runs of letters/digits (Hangul, Kana and Kanji are letters too),
+// runs of other symbols, and whitespace between them.
+const charClass = (c) => (/\s/u.test(c) ? 0 : /[\p{L}\p{M}\p{N}_]/u.test(c) ? 1 : 2);
+
+function prevWord(i) {
+  while (i > 0 && charClass(chars[i - 1]) === 0) i--;
+  const c = i > 0 ? charClass(chars[i - 1]) : 0;
+  while (i > 0 && charClass(chars[i - 1]) === c) i--;
+  return i;
+}
+
+function nextWord(i) {
+  const c = i < chars.length ? charClass(chars[i]) : 0;
+  if (c !== 0) while (i < chars.length && charClass(chars[i]) === c) i++;
+  while (i < chars.length && charClass(chars[i]) === 0) i++;
+  return i;
+}
+
+// lastIndexOf with a negative start counts from the end, so position 0 needs its own case.
+const lineStart = (i) => (i === 0 ? 0 : chars.lastIndexOf('\n', i - 1) + 1);
+const lineEnd = (i) => { const j = chars.indexOf('\n', i); return j < 0 ? chars.length : j; };
+
+const MOVES = {
+  ArrowLeft: (ctrl) => (ctrl ? prevWord(caret) : Math.max(0, caret - 1)),
+  ArrowRight: (ctrl) => (ctrl ? nextWord(caret) : Math.min(chars.length, caret + 1)),
+  Home: (ctrl) => (ctrl ? 0 : lineStart(caret)),
+  End: (ctrl) => (ctrl ? chars.length : lineEnd(caret)),
+};
+
+function moveCaret(code, ctrl, shift) {
+  const r = selRange();
+  if (!shift && !ctrl && r && (code === 'ArrowLeft' || code === 'ArrowRight')) {
+    caret = code === 'ArrowLeft' ? r[0] : r[1]; // collapse the selection to its edge
+    anchor = null;
+    return;
+  }
+  const target = MOVES[code](ctrl);
+  if (shift) anchor ??= caret;
+  else anchor = null;
+  caret = target;
+}
+
+/**
+ * Editing shortcuts done on the JS side, after the composition is flushed.
+ * Plain Left/Right stay with the engine (segment moves while composing).
+ */
+function editAction(code, ctrl, shift) {
+  if (code in MOVES && (ctrl || shift || code === 'Home' || code === 'End')) {
+    return () => moveCaret(code, ctrl, shift);
+  }
+  switch ((ctrl ? 'Ctrl+' : '') + code) {
+    case 'Ctrl+KeyA': return () => { anchor = 0; caret = chars.length; };
+    case 'Ctrl+Backspace': return () => deleteTo(prevWord(caret));
+    case 'Ctrl+Delete': return () => deleteTo(nextWord(caret));
+    case 'Delete': return () => deleteTo(Math.min(chars.length, caret + 1));
+  }
+  return null;
 }
 
 // Default editing action for a key the engine did not handle.
@@ -50,14 +135,29 @@ function applyDefault(key) {
   switch (key) {
     case KEY.Space: insert(' '); break;
     case KEY.Enter: insert('\n'); break;
-    case KEY.Backspace: if (caret > 0) chars.splice(--caret, 1); break;
-    case KEY.Left: caret = Math.max(0, caret - 1); break;
-    case KEY.Right: caret = Math.min(chars.length, caret + 1); break;
+    case KEY.Backspace: deleteTo(Math.max(0, caret - 1)); break;
+    case KEY.Left: moveCaret('ArrowLeft', false, false); break;
+    case KEY.Right: moveCaret('ArrowRight', false, false); break;
   }
 }
 
 function render() {
   editor.replaceChildren();
+  const r = selRange();
+  if (r) {
+    // A selection never coexists with a preedit: every key that makes one flushes first.
+    const sel = document.createElement('span');
+    sel.className = 'selected';
+    sel.textContent = chars.slice(r[0], r[1]).join('');
+    const c = document.createElement('span');
+    c.className = 'caret';
+    c.setAttribute('aria-hidden', 'true');
+    editor.append(document.createTextNode(chars.slice(0, r[0]).join('')));
+    if (caret === r[0]) editor.append(c, sel);
+    else editor.append(sel, c);
+    editor.append(document.createTextNode(chars.slice(r[1]).join('')));
+    return;
+  }
   editor.append(document.createTextNode(chars.slice(0, caret).join('')));
   let focusedEl = null;
   if (preedit) {
@@ -112,7 +212,21 @@ function handle(res, key) {
 
 editor.addEventListener('keydown', (e) => {
   if (!engine || BARE_MODIFIERS.has(e.code)) return; // bare modifier presses must not flush the composition
+  const action = !e.altKey && editAction(e.code, e.ctrlKey || e.metaKey, e.shiftKey);
+  if (action) {
+    e.preventDefault();
+    // Other flushes the composition; commit it before editing so no preedit text is lost.
+    handle(engine.key(KEY.Other, 0, e.shiftKey, e.ctrlKey || e.metaKey), KEY.Other);
+    action();
+    render();
+    return;
+  }
   const [key, ch, shift, modifier] = mapKey(e);
+  if (!modifier && selRange()) {
+    // No preedit exists while text is selected, so these replace the selection directly.
+    if (key === KEY.Backspace) { e.preventDefault(); deleteSelection(); render(); return; }
+    if (key === KEY.Char || key === KEY.Space || key === KEY.Enter) deleteSelection();
+  }
   const res = engine.key(key, ch, shift, modifier);
   // Modifier combos and unmapped keys (Ctrl+R, F5, Tab, ...) keep the browser default;
   // the engine already flushed any composition for them.
@@ -127,10 +241,29 @@ editor.addEventListener('blur', () => {
 
 editor.addEventListener('mousedown', () => setTimeout(() => editor.focus(), 0));
 
+// The editor is not contenteditable, so clipboard events target <body>; take them while it has focus.
+function onCopy(e, cut) {
+  const r = selRange();
+  if (document.activeElement !== editor || !r) return;
+  e.preventDefault();
+  e.clipboardData.setData('text/plain', chars.slice(r[0], r[1]).join(''));
+  if (cut) { deleteSelection(); render(); }
+}
+document.addEventListener('copy', (e) => onCopy(e, false));
+document.addEventListener('cut', (e) => onCopy(e, true));
+document.addEventListener('paste', (e) => {
+  if (document.activeElement !== editor || !engine) return;
+  e.preventDefault();
+  if (preedit) handle(engine.reset(), KEY.Other);
+  insert((e.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n'));
+  render();
+});
+
 document.getElementById('clear').addEventListener('click', () => {
   if (engine) engine.reset();
   chars = [];
   caret = 0;
+  anchor = null;
   preedit = null;
   debugEl.textContent = '(아직 없음)';
   render();

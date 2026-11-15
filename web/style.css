@@ -26,6 +26,7 @@ label { display: block; font-weight: 600; margin: 1rem 0 .3rem; }
 #editor:focus .caret { animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #editor:focus .caret { animation: none; } }
+.selected { background: var(--sel); color: var(--sel-fg); }
 .seg { text-decoration: underline; text-underline-offset: 3px; border-radius: 3px; }
 .seg.En { background: var(--en); }
 .seg.Ko { background: var(--ko); }
