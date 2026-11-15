@@ -1,0 +1,61 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Read pinned Mozc commit
+        id: mozc
+        run: |
+          commit="$(grep -oE 'MOZC_COMMIT: &str = "[0-9a-f]{40}"' tools/nullime-dict/src/main.rs | grep -oE '[0-9a-f]{40}')"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: target/mozc
+          key: mozc-${{ steps.mozc.outputs.commit }}
+
+      # nullime-windows is a Windows-only TSF DLL.
+      - run: cargo test --workspace --exclude nullime-windows
+
+      - run: scripts/build-web.sh
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
