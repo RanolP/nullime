@@ -95,6 +95,32 @@ impl Engine {
 - Windows: `platform/windows`가 `nullime-engine`을 Rust 의존성으로 직접 쓴다.
 - macOS(나중, D14): UniFFI로 Swift 바인딩을 만든다.
 
+## Windows
+
+`platform/windows`(패키지 `nullime-windows`)는 TSF 텍스트 입력 처리기(TIP) DLL이다. 엔진 크레이트를 직접 쓰고, ko-KR(LANGID 0x0412) 입력 프로필 하나로 등록된다.
+
+- 모듈은 도메인별로 나눈다: `server`(클래스 팩토리, `DllGetClassObject`/`DllCanUnloadNow`), `registration`(`DllRegisterServer`/`DllUnregisterServer`, CLSID·프로필 GUID), `keymap`(가상 키 → 엔진 키, 순수 함수), `service`(TSF 연결: 활성화, 키 이벤트, 포커스 변경), `composition`(편집 세션에서 `Response`를 문서에 반영), `display_attribute`(입력 밑줄, 포커스된 칸 굵은 밑줄), `candidate_window`(후보 창).
+- `OnTestKeyDown`은 엔진을 건드리지 않고 먹을지 예측한다. 조합 중이면 모든 키, 아니면 수식키 없는 `Char`만 먹겠다고 답한다. `OnKeyDown`이 엔진을 부르고, 동기 편집 세션(`TF_ES_SYNC`)으로 확정·조합을 반영한 뒤 `Response.handled`를 그대로 돌려준다. 그래서 확정 뒤의 스페이스·엔터는 앱이 받는다 (D5). 동기 세션이 거절되면 비동기로 넘긴다.
+- Shift, Ctrl, Alt, Win, Caps Lock 키 자체를 누른 것은 엔진에 넘기지 않는다. 넘기면 `Other`가 되어 Shift+Q를 치기 전에 조합이 확정된다.
+- 문서 포커스가 바뀌면 `engine.reset()`의 확정 텍스트로 조합을 끝낸다. 앱이 조합을 먼저 끝내면(`OnCompositionTerminated`) 조합 창 텍스트가 곧 확정 텍스트이므로 그대로 두고 엔진만 비운다.
+- 후보 창은 포커스를 가져가지 않는 자체 Win32 팝업(`WS_POPUP`, `WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE`)이다. `ITfContextView::GetTextExt`로 얻은 포커스된 칸 아래에 뜨고, 그 칸의 후보와 언어 태그를 보여주며 선택 후보를 강조한다.
+
+### 설치
+
+빌드는 `cargo build -p nullime-windows --release`이고 산출물은 `target\release\nullime_windows.dll`(64비트)이다. 등록은 레지스트리를 쓰므로 사용자가 관리자 권한 명령 프롬프트에서 저장소 루트로 이동해 직접 한다.
+
+```
+regsvr32 "%CD%\target\release\nullime_windows.dll"
+```
+
+해제는 다음과 같다. DLL을 다시 빌드하기 전에도 해제하거나, 입력기를 쓰는 앱을 모두 닫는다 (로드된 DLL은 덮어쓸 수 없다).
+
+```
+regsvr32 /u "%CD%\target\release\nullime_windows.dll"
+```
+
+등록 뒤 설정 > 시간 및 언어 > 언어 및 지역에서 한국어의 언어 옵션을 열고 키보드 추가에서 NullIME을 고른다. 한국어가 목록에 없으면 먼저 언어 추가로 한국어를 넣는다. 입력할 때는 Win+Space로 NullIME을 고른다.
+
 ## 웹 데모
 
 `web/`에 정적 데모 페이지(`index.html`, `main.js`, `style.css`)가 있다. 빌드와 실행은 `web/README.md`를 따른다. 페이지는 `event.code`로 물리 키를 US QWERTY 문자로 바꿔 `engine.key()`에 넘기고, `Response`의 `commit`을 자체 편집기에 넣은 뒤 `handled = false`면 기본 동작(공백, 줄바꿈, 글자 삭제, 커서 이동)을 직접 적용한다. 조합 창은 칸마다 언어별 색을 입히고, 포커스된 칸 아래에 후보 목록을 띄운다. 마지막 `Response` JSON은 디버그 패널에 보인다.
