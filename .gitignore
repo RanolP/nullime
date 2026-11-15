@@ -1,3 +1,4 @@
 target/
 /web/*.wasm
+/web/pkg/
 .DS_Store
