@@ -36,7 +36,25 @@
     </p>
   </section>
 
+  <section aria-labelledby="cases-heading">
+    <h2 id="cases-heading">평가 사례 모으기</h2>
+    <p class="note">틀린 해석은 <kbd>↑</kbd><kbd>↓</kbd>로 바로잡은 뒤 확정하고 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>(또는 아래 버튼)를 누르면 마지막 조합이 <code>키 입력열⇥답</code> 한 줄로 쌓인다. 답이 후보에 없으면 둘째 열을 직접 고친다. 모은 줄은 <code>tools/nullime-dict/mixed.tsv</code>에 붙여 넣고 <code>nullime-dict eval --mixed</code>로 잰다. 이 브라우저에 저장된다.</p>
+    <label for="cases">모은 사례</label>
+    <textarea id="cases" rows="6" spellcheck="false"></textarea>
+    <p>
+      <button type="button" id="case-add">마지막 조합 추가</button>
+      <button type="button" id="case-copy">복사</button>
+      <button type="button" id="case-clear">비우기</button>
+      <span id="case-status" role="status"></span>
+    </p>
+  </section>
+
   <details open>
+    <summary>점수 분석: 마지막 조합</summary>
+    <div id="explain">(아직 없음)</div>
+  </details>
+
+  <details>
     <summary>디버그: 마지막 Response</summary>
     <pre id="debug">(아직 없음)</pre>
   </details>

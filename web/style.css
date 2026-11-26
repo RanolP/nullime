@@ -45,3 +45,17 @@ kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 .35rem; ma
 #status { color: var(--muted); font-size: .9rem; min-height: 1.4em; }
 button { font: inherit; padding: .3rem .9rem; }
 #debug { background: var(--panel); border: 1px solid var(--border); padding: .6rem; overflow: auto; max-height: 20rem; font-size: .85rem; }
+#cases { box-sizing: border-box; width: 100%; font: .9rem/1.5 ui-monospace, monospace; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: .4rem; tab-size: 12; }
+#case-status { color: var(--muted); font-size: .9rem; margin-left: .5rem; }
+#explain { font-size: .9rem; }
+#explain .seg-head { margin: .8rem 0 .2rem; font-weight: 600; }
+#explain .seg-head code { font-weight: 400; }
+#explain table { border-collapse: collapse; width: 100%; background: var(--panel); }
+#explain th, #explain td { border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); padding: .15rem .45rem; text-align: left; vertical-align: top; }
+#explain th { font-weight: 600; color: var(--muted); }
+#explain td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#explain td.terms { color: var(--muted); font-size: .85em; }
+#explain tr.sel td { background: color-mix(in srgb, var(--sel) 22%, transparent); font-weight: 600; }
+#explain .lang { border-radius: 3px; padding: 0 .3rem; font-size: .8em; }
+#explain .lang.En { background: var(--en); } #explain .lang.Ko { background: var(--ko); } #explain .lang.Ja { background: var(--ja); }
+#explain .total { margin-top: .6rem; }

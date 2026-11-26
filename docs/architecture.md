@@ -88,7 +88,7 @@ serde로 내보낼 때 `cost`가 `None`이면 필드를 생략한다.
 - 한 칸은 최대 32 키 입력이다 (`decode::MAX_SPAN`).
 - 해석은 점진적이다 (`decode::Lattice`). 위치 j까지의 최고 경로는 `keys[..j]`에만 달려 있으므로, 키 하나를 더하면 그 키에서 끝나는 구간(최대 32개)만 계산하고 백스페이스는 마지막 노드를 버린다. 고정 칸이 바뀌어 다시 해석할 시작점이 달라지면 그 뒤를 새로 계산한다. 결과는 매번 처음부터 해석한 것과 같다.
 - 어떤 해석기도 읽지 못한 구간은 키를 입력한 그대로(`En`) 낮은 점수(키당 -10)의 후보 하나로 둔다. 그래서 모든 칸은 후보가 하나 이상이다.
-- 교체 지점: `Interpreter`(구간 → 후보, 언어별 선호 순서), `Scorer`(`score(strokes, candidate, rank)`는 높을수록 좋은 점수, `segment_penalty()`와 `mid_word_switch_penalty(prev, strokes, next)`는 경로 점수에서 빼는 벌점이며 뒤의 것은 단어 안 경계에서만 불린다. `next`는 뒤 칸의 후보, `strokes`는 그 칸의 키 입력이고, 그 칸을 다시 매기는 경우 음수일 수 있다), `kanji::Dictionary`·`kanji::Connection`(아래 "일본어 변환"). `Engine::with_parts(interpreters, scorer)`로 갈아 끼운다.
+- 교체 지점: `Interpreter`(구간 → 후보, 언어별 선호 순서), `Scorer`(`score(strokes, candidate, rank)`는 높을수록 좋은 점수, `explain(strokes, candidate, rank)`는 그 점수를 합이 같은 이름 붙은 항으로 나눈 것이고(기본은 항 하나), `segment_penalty()`와 `mid_word_switch_penalty(prev, strokes, next)`는 경로 점수에서 빼는 벌점이며 뒤의 것은 단어 안 경계에서만 불린다. `next`는 뒤 칸의 후보, `strokes`는 그 칸의 키 입력이고, 그 칸을 다시 매기는 경우 음수일 수 있다), `kanji::Dictionary`·`kanji::Connection`(아래 "일본어 변환"). `Engine::with_parts(interpreters, scorer)`로 갈아 끼운다.
 
 ### 점수
 
@@ -182,14 +182,17 @@ impl Engine {
     pub fn with_ja_dictionary(asset: JaAsset) -> Engine;
     pub fn key(&mut self, ev: KeyEvent) -> Response;
     pub fn reset(&mut self) -> Response; // 포커스 이동 등에서 조합을 확정하고 닫는다
+    pub fn explain(&self) -> Explanation; // 표시용: 지금 조합의 점수 분석
 }
 ```
+
+`explain`은 칸마다 그 구간을 다시 해석해 후보별 점수, 점수의 항(`Scorer::explain`), 앞 칸의 선택 후보 뒤에서 치르는 전환 벌점, 경로 기여(점수 - 칸 벌점 - 전환 벌점)를 낸다. 고른 후보의 경로 기여를 더하면 경로 점수다. 마지막 고정 칸 바로 뒤 칸은 lattice가 새로 시작하므로 전환 벌점이 없다. `keys`는 키 입력열이고 Shift를 누른 영문자는 대문자다. `mixed.tsv`의 첫 열과 같은 꼴이다. 칸 수만큼 해석을 더 하므로 표시할 때만 부른다.
 
 ## 바인딩
 
 플랫폼마다 표준 바인딩 도구를 쓴다. C ABI를 손으로 짜지 않는다.
 
-- 웹: `crates/nullime-wasm`이 wasm-bindgen으로 `Engine`을 JS 클래스로 내보낸다. `Response`는 serde로 JS 객체가 된다. 필드 이름은 Rust 그대로(snake_case)이고, `lang`은 문자열 `"En"`/`"Ko"`/`"Ja"`, `preedit`가 없으면 `null`이다 (`serde_wasm_bindgen::Serializer::json_compatible`). JS 쪽 API는 `new Engine()`, `Engine.withDictionary(bytes)`(`Uint8Array`, 잘못된 파일이면 예외), `engine.dictionaryEntries`(사전 항목 수, 샘플 사전이면 `undefined`), `engine.key(key, ch, shift, modifier)`(key: 0=Other 1=Char 2=Space 3=Enter 4=Backspace 5=Left 6=Right 7=Up 8=Down, ch: key가 1일 때 ASCII 코드), `engine.reset()`이다. 빌드는 `cargo build --target wasm32-unknown-unknown` 후 `wasm-bindgen --target web`이다.
+- 웹: `crates/nullime-wasm`이 wasm-bindgen으로 `Engine`을 JS 클래스로 내보낸다. `Response`는 serde로 JS 객체가 된다. 필드 이름은 Rust 그대로(snake_case)이고, `lang`은 문자열 `"En"`/`"Ko"`/`"Ja"`, `preedit`가 없으면 `null`이다 (`serde_wasm_bindgen::Serializer::json_compatible`). JS 쪽 API는 `new Engine()`, `Engine.withDictionary(bytes)`(`Uint8Array`, 잘못된 파일이면 예외), `engine.dictionaryEntries`(사전 항목 수, 샘플 사전이면 `undefined`), `engine.key(key, ch, shift, modifier)`(key: 0=Other 1=Char 2=Space 3=Enter 4=Backspace 5=Left 6=Right 7=Up 8=Down, ch: key가 1일 때 ASCII 코드), `engine.reset()`, `engine.explain()`(`Explanation`을 같은 방식으로 JS 객체로)이다. 빌드는 `cargo build --target wasm32-unknown-unknown` 후 `wasm-bindgen --target web`이다.
 - Windows: `platform/windows`가 `nullime-engine`을 Rust 의존성으로 직접 쓴다.
 - macOS(나중, D14): UniFFI로 Swift 바인딩을 만든다.
 
@@ -222,5 +225,7 @@ regsvr32 /u "%CD%\target\release\nullime_windows.dll"
 ## 웹 데모
 
 `web/`에 정적 데모 페이지(`index.html`, `main.js`, `style.css`)가 있다. 빌드와 실행은 `web/README.md`를 따른다. 페이지는 `event.code`로 물리 키를 US QWERTY 문자로 바꿔 `engine.key()`에 넘기고, `Response`의 `commit`을 자체 편집기에 넣은 뒤 `handled = false`면 기본 동작(공백, 줄바꿈, 글자 삭제, 커서 이동)을 직접 적용한다. 조합 창은 칸마다 언어별 색을 입히고, 포커스된 칸 아래에 후보 목록을 띄운다. 마지막 `Response` JSON은 디버그 패널에 보인다.
+
+실험대 기능: 조합이 바뀔 때마다 `engine.explain()`을 불러 "점수 분석" 패널에 칸별 후보의 점수, 항, 전환, 경로 기여를 표로 보인다. 확정한 뒤에도 마지막 조합이 남는다. "평가 사례 모으기"는 `Ctrl+Enter`(또는 버튼)로 마지막 조합을 `키 입력열\t고른 후보를 이은 텍스트` 한 줄로 쌓는다. 화살표로 바로잡은 뒤 누르면 바로잡은 답이 들어간다. 줄은 `localStorage`에 저장되고 고쳐 쓸 수 있으며, `mixed.tsv`에 붙여 넣어 쓴다. 조합 하나만 담으므로 공백이 든 사례는 직접 고친다.
 
 시작할 때 `assets/nullime-ja.small.dict`를 받아 엔진을 바꾸고, 실패하면 샘플 사전으로 남는다. 상태 줄은 "사전 로드됨: …" 또는 "사전 없음: 샘플 사전 사용"이다. "전체 사전 받기" 버튼은 `assets/nullime-ja.dict`를 받아 바꾸고, 파일 선택 칸은 사용자의 `.dict` 파일을 읽어 바꾼다 (D17, D18). 바꾸기 전에 조합 중인 텍스트를 확정한다.

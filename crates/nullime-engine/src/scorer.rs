@@ -15,7 +15,24 @@ pub trait Scorer {
     /// May be negative: it can re-score `next` under a model for what follows
     /// a word (a particle) in place of its `score`. `strokes` is `next`'s span.
     fn mid_word_switch_penalty(&self, prev: Lang, strokes: &[Stroke], next: &Candidate) -> f32;
+    /// `score` split into named terms that sum to it, for display
+    /// (`Engine::explain`). The default is the score as one term.
+    fn explain(&self, strokes: &[Stroke], candidate: &Candidate, rank: usize) -> Vec<Term> {
+        vec![Term { name: "score", value: self.score(strokes, candidate, rank) }]
+    }
 }
+
+/// One named part of a score.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct Term {
+    pub name: &'static str,
+    pub value: f32,
+}
+
+/// Every score `BaselineScorer` gives is the sum of at most this many terms.
+const TERMS: usize = 4;
+type Terms = [(&'static str, f32); TERMS];
 
 /// Korean and English spans score as how much likelier their language model
 /// makes the text than random keys would (docs/architecture.md "점수").
@@ -82,20 +99,22 @@ impl Default for BaselineScorer {
 }
 
 impl BaselineScorer {
-    fn english(&self, text: &str) -> f32 {
+    fn english(&self, text: &str) -> Terms {
         // Digits and punctuation are literal in every language, so they
         // score 0 and only letter runs decide.
-        text.split(|c: char| !c.is_ascii_alphabetic())
-            .filter(|w| !w.is_empty())
-            .map(|w| {
-                let bonus = self.en_words.contains(w.to_ascii_lowercase().as_str());
-                lm::en_word(w) + RANDOM_KEY * w.len() as f32 + if bonus { EN_WORD_BONUS } else { 0.0 }
-            })
-            .sum()
+        let (mut logp, mut keys, mut bonus) = (0.0, 0.0, 0.0);
+        for w in text.split(|c: char| !c.is_ascii_alphabetic()).filter(|w| !w.is_empty()) {
+            logp += lm::en_word(w);
+            keys += RANDOM_KEY * w.len() as f32;
+            if self.en_words.contains(w.to_ascii_lowercase().as_str()) {
+                bonus += EN_WORD_BONUS;
+            }
+        }
+        [("lm", logp), ("random_keys", keys), ("word_list", bonus), ("", 0.0)]
     }
 
-    fn korean(&self, text: &str, letters: f32) -> f32 {
-        korean_logp(text) + RANDOM_KEY * letters
+    fn korean(&self, text: &str, letters: f32) -> Terms {
+        [("lm", korean_logp(text)), ("random_keys", RANDOM_KEY * letters), ("", 0.0), ("", 0.0)]
     }
 
     /// How much less likely `text` is right after English letters than
@@ -109,10 +128,27 @@ impl BaselineScorer {
         general - after
     }
 
-    fn japanese(&self, strokes: &[Stroke], cost: i32, letters: f32) -> f32 {
+    fn japanese(&self, strokes: &[Stroke], cost: i32, letters: f32) -> Terms {
         let romaji: String = strokes.iter().map(|s| s.ch as char).collect();
         let reading = romaji::to_hiragana(&romaji).iter().map(|r| lm::ja_reading(r)).fold(f32::MIN, f32::max);
-        reading + RANDOM_KEY * letters + JA_PRIOR + (JA_COST_PER_LETTER * letters - cost as f32).max(0.0) / JA_COST_SCALE
+        [
+            ("lm", reading),
+            ("random_keys", RANDOM_KEY * letters),
+            ("prior", JA_PRIOR),
+            ("dictionary", (JA_COST_PER_LETTER * letters - cost as f32).max(0.0) / JA_COST_SCALE),
+        ]
+    }
+
+    fn terms(&self, strokes: &[Stroke], candidate: &Candidate, rank: usize) -> Terms {
+        let letters = letters(strokes);
+        match candidate.lang {
+            Lang::En => self.english(&candidate.text),
+            Lang::Ko => self.korean(&candidate.text, letters),
+            Lang::Ja => match candidate.cost {
+                Some(cost) => self.japanese(strokes, cost, letters),
+                None => [("per_letter", PER_LETTER * letters), ("rank", -JA_RANK_STEP * rank as f32), ("", 0.0), ("", 0.0)],
+            },
+        }
     }
 
     /// `korean_after_word` for Japanese: the span's `score` minus its score
@@ -145,15 +181,12 @@ fn korean_logp(text: &str) -> f32 {
 
 impl Scorer for BaselineScorer {
     fn score(&self, strokes: &[Stroke], candidate: &Candidate, rank: usize) -> f32 {
-        let letters = letters(strokes);
-        match candidate.lang {
-            Lang::En => self.english(&candidate.text),
-            Lang::Ko => self.korean(&candidate.text, letters),
-            Lang::Ja => match candidate.cost {
-                Some(cost) => self.japanese(strokes, cost, letters),
-                None => PER_LETTER * letters - JA_RANK_STEP * rank as f32,
-            },
-        }
+        self.terms(strokes, candidate, rank).iter().map(|t| t.1).sum()
+    }
+
+    fn explain(&self, strokes: &[Stroke], candidate: &Candidate, rank: usize) -> Vec<Term> {
+        let terms = self.terms(strokes, candidate, rank);
+        terms.iter().filter(|t| !t.0.is_empty()).map(|&(name, value)| Term { name, value }).collect()
     }
 
     fn segment_penalty(&self) -> f32 {

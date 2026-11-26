@@ -1,7 +1,7 @@
 //! wasm-bindgen wrapper exposing `nullime_engine::Engine` to the web demo.
 //! Responses become plain JS objects with the Rust (snake_case) field names.
 
-use nullime_engine::{Key, KeyEvent, Response};
+use nullime_engine::{Key, KeyEvent};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -54,6 +54,11 @@ impl Engine {
     pub fn reset(&mut self) -> JsValue {
         to_js(&self.0.reset())
     }
+
+    /// Score breakdown of the current composition (`Engine::explain`).
+    pub fn explain(&self) -> JsValue {
+        to_js(&self.0.explain())
+    }
 }
 
 impl Default for Engine {
@@ -62,11 +67,9 @@ impl Default for Engine {
     }
 }
 
-fn to_js(response: &Response) -> JsValue {
+fn to_js(value: &impl Serialize) -> JsValue {
     // json_compatible: `preedit: None` becomes `null` rather than `undefined`.
-    // `Response` holds only strings, numbers, bools and options, so
-    // serialization cannot fail.
-    response
-        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-        .expect("Response serializes")
+    // `Response` and `Explanation` hold only strings, numbers, bools, options
+    // and lists, so serialization cannot fail.
+    value.serialize(&serde_wasm_bindgen::Serializer::json_compatible()).expect("value serializes")
 }

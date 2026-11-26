@@ -127,6 +127,7 @@ function editAction(code, ctrl, shift) {
     case 'Ctrl+Delete': return () => deleteTo(nextWord(caret));
     case 'Delete': return () => deleteTo(Math.min(chars.length, caret + 1));
     case 'Ctrl+KeyC': case 'Ctrl+KeyX': return selRange() ? () => copySelection(code === 'KeyX') : null;
+    case 'Ctrl+Enter': return () => addCase();
   }
   return null;
 }
@@ -208,8 +209,110 @@ function handle(res, key) {
   if (res.commit) insert(res.commit);
   if (!res.handled) applyDefault(key);
   preedit = res.preedit ?? null;
+  // The last composition stays explained after it is committed, so it can be read and added as a case.
+  if (preedit) {
+    lastComposition = { explanation: engine.explain(), preedit };
+    renderExplanation();
+  }
   render();
 }
+
+// ---- Score breakdown (Engine::explain) ----
+
+const explainEl = document.getElementById('explain');
+let lastComposition = null; // { explanation, preedit } of the latest key that left a composition
+
+const TERM_LABELS = {
+  lm: '언어 모델', random_keys: '키 수×ln 26', word_list: '단어 목록', prior: '일본어 기본값',
+  dictionary: '사전 증거', per_letter: '글자당', rank: '순위', unread: '해석 불가', score: '점수',
+};
+const num = (v) => (v > 0 ? '+' : '') + v.toFixed(2);
+
+function cell(row, text, className) {
+  const td = document.createElement('td');
+  td.textContent = text;
+  if (className) td.className = className;
+  row.append(td);
+  return td;
+}
+
+function renderExplanation() {
+  const { explanation: x, preedit: p } = lastComposition;
+  explainEl.replaceChildren();
+  let total = 0;
+  x.segments.forEach((seg, i) => {
+    const selected = p.segments[i].selected;
+    total += seg.candidates[selected].net;
+    const head = document.createElement('p');
+    head.className = 'seg-head';
+    const keys = document.createElement('code');
+    keys.textContent = seg.keys;
+    head.append(`칸 ${i + 1} `, keys, seg.pinned ? ' (고정)' : '');
+    const table = document.createElement('table');
+    const hr = table.createTHead().insertRow();
+    for (const h of ['후보', '언어', '점수', '구성', '전환', '경로 기여']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      hr.append(th);
+    }
+    const body = table.createTBody();
+    seg.candidates.forEach((c, j) => {
+      const row = body.insertRow();
+      if (j === selected) row.className = 'sel';
+      cell(row, c.text);
+      const lang = document.createElement('span');
+      lang.className = `lang ${c.lang}`;
+      lang.textContent = c.lang;
+      cell(row, '').append(lang);
+      cell(row, num(c.score), 'num');
+      cell(row, c.terms.map((t) => `${TERM_LABELS[t.name] ?? t.name} ${num(t.value)}`).join(' · '), 'terms');
+      cell(row, c.switch ? num(-c.switch) : '', 'num');
+      cell(row, num(c.net), 'num');
+    });
+    explainEl.append(head, table);
+  });
+  const foot = document.createElement('p');
+  foot.className = 'total';
+  foot.textContent = `경로 점수 ${num(total)} = 고른 후보의 경로 기여 합. 경로 기여 = 점수 - 칸 벌점 ${x.segment_penalty} + 전환(한 단어 안에서 언어가 바뀌는 경계에만 붙는다). 키 입력열: ${x.keys}`;
+  explainEl.append(foot);
+}
+
+// ---- Evaluation cases (tools/nullime-dict/mixed.tsv lines) ----
+
+const casesEl = document.getElementById('cases');
+const caseStatusEl = document.getElementById('case-status');
+const CASES_KEY = 'nullime.cases';
+casesEl.value = localStorage.getItem(CASES_KEY) ?? '';
+casesEl.addEventListener('input', () => localStorage.setItem(CASES_KEY, casesEl.value));
+
+function addCase() {
+  if (!lastComposition) { caseStatusEl.textContent = '아직 조합한 것이 없다.'; return; }
+  const { explanation, preedit: p } = lastComposition;
+  const line = `${explanation.keys}\t${p.segments.map((s) => s.text).join('')}`;
+  const v = casesEl.value;
+  casesEl.value = v + (v && !v.endsWith('\n') ? '\n' : '') + line + '\n';
+  localStorage.setItem(CASES_KEY, casesEl.value);
+  caseStatusEl.textContent = `추가함: ${line.replace('\t', ' → ')}`;
+}
+
+// Keep the editor focused: a blur would commit the composition before the click.
+document.getElementById('case-add').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('case-add').addEventListener('click', addCase);
+document.getElementById('case-copy').addEventListener('click', async () => {
+  try {
+    // navigator.clipboard exists only in secure contexts (https, localhost).
+    await navigator.clipboard.writeText(casesEl.value);
+    caseStatusEl.textContent = '복사함.';
+  } catch {
+    casesEl.select();
+    caseStatusEl.textContent = '클립보드에 쓰지 못해 선택만 했다. Ctrl+C로 복사한다.';
+  }
+});
+document.getElementById('case-clear').addEventListener('click', () => {
+  casesEl.value = '';
+  localStorage.removeItem(CASES_KEY);
+  caseStatusEl.textContent = '비움.';
+});
 
 editor.addEventListener('keydown', (e) => {
   if (!engine || BARE_MODIFIERS.has(e.code)) return; // bare modifier presses must not flush the composition

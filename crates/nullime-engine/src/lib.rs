@@ -13,7 +13,7 @@ pub mod lm;
 pub mod romaji;
 pub mod scorer;
 
-pub use engine::Engine;
+pub use engine::{CandidateExplanation, Engine, Explanation, SegmentExplanation};
 
 #[cfg(feature = "serde")]
 use serde::Serialize;

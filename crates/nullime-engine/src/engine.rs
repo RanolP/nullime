@@ -1,13 +1,54 @@
 //! Per-key state machine (docs/architecture.md "키별 동작").
 
-use crate::decode::Lattice;
+use crate::decode::{self, Lattice};
 use crate::english::EnglishInterpreter;
 use crate::hangul::HangulInterpreter;
 use crate::ja_asset::JaAsset;
 use crate::kanji::{Connection, Dictionary, SampleDictionary};
 use crate::romaji::JapaneseInterpreter;
-use crate::scorer::{BaselineScorer, Scorer};
-use crate::{Interpreter, Key, KeyEvent, Preedit, Response, Segment, Stroke};
+use crate::scorer::{BaselineScorer, Scorer, Term};
+use crate::{Interpreter, Key, KeyEvent, Lang, Preedit, Response, Segment, Stroke};
+
+#[cfg(feature = "serde")]
+use serde::Serialize;
+
+/// Why the composition reads as it does (`Engine::explain`), for the web
+/// testbed. Path score = sum of the selected candidates' `net`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct Explanation {
+    /// Every composing key, letters typed with Shift in uppercase: the input
+    /// column of `tools/nullime-dict/mixed.tsv`.
+    pub keys: String,
+    /// Charged once per segment.
+    pub segment_penalty: f32,
+    pub segments: Vec<SegmentExplanation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct SegmentExplanation {
+    pub keys: String,
+    pub pinned: bool,
+    /// Same order as `Segment::candidates`.
+    pub candidates: Vec<CandidateExplanation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct CandidateExplanation {
+    pub text: String,
+    pub lang: Lang,
+    pub score: f32,
+    /// `score` split into the scorer's terms (`Scorer::explain`).
+    pub terms: Vec<Term>,
+    /// What the decoder charges for this reading after the previous segment's
+    /// selected one (`Scorer::mid_word_switch_penalty`); 0 when the boundary
+    /// does not cut a word.
+    pub switch: f32,
+    /// `score - segment_penalty - switch`: what choosing it adds to the path.
+    pub net: f32,
+}
 
 struct Seg {
     start: usize,
@@ -125,6 +166,49 @@ impl Engine {
         }
     }
 
+    /// Re-scores every segment's candidates as the decoder saw them. Costs
+    /// one more decode of each segment's span, so call it for display only.
+    pub fn explain(&self) -> Explanation {
+        let scorer = self.scorer.as_ref();
+        let penalty = scorer.segment_penalty();
+        let segments = self
+            .segs
+            .iter()
+            .enumerate()
+            .map(|(k, seg)| {
+                let strokes = &self.strokes[seg.start..seg.end];
+                let scored = decode::candidates(strokes, &self.interpreters, scorer);
+                // The lattice after the last pinned segment starts fresh, so
+                // its first span pays no switch against the pinned one.
+                let prev = (k > 0 && seg.start != self.lattice_from && decode::mid_word(&self.strokes, seg.start))
+                    .then(|| self.segs[k - 1].candidates[self.segs[k - 1].selected].lang);
+                let candidates = seg
+                    .candidates
+                    .iter()
+                    .map(|c| {
+                        let (_, score, rank) =
+                            scored.iter().find(|s| s.0.text == c.text).expect("segment candidates come from this span");
+                        let terms = match rank {
+                            Some(rank) => scorer.explain(strokes, c, *rank),
+                            None => vec![Term { name: "unread", value: *score }],
+                        };
+                        let switch = prev.map_or(0.0, |p| scorer.mid_word_switch_penalty(p, strokes, c));
+                        CandidateExplanation {
+                            text: c.text.clone(),
+                            lang: c.lang,
+                            score: *score,
+                            terms,
+                            switch,
+                            net: score - penalty - switch,
+                        }
+                    })
+                    .collect();
+                SegmentExplanation { keys: keys(strokes), pinned: seg.pinned, candidates }
+            })
+            .collect();
+        Explanation { keys: keys(&self.strokes), segment_penalty: penalty, segments }
+    }
+
     /// Commits whatever is composing and closes the composition window.
     pub fn reset(&mut self) -> Response {
         self.finish()
@@ -186,6 +270,10 @@ impl Engine {
             preedit: Some(Preedit { segments: self.segments(), focused: self.focused }),
         }
     }
+}
+
+fn keys(strokes: &[Stroke]) -> String {
+    strokes.iter().map(|s| if s.shift { s.ch.to_ascii_uppercase() } else { s.ch } as char).collect()
 }
 
 fn pass() -> Response {
@@ -460,5 +548,41 @@ mod tests {
             let segs: Vec<_> = p.segments.iter().map(|s| (s.text.as_str(), s.lang)).collect();
             assert_eq!(segs, [(en, Lang::En), (ja, Lang::Ja)], "{w}");
         }
+    }
+
+    // The web testbed shows `explain` as the reason for a reading and exports
+    // its `keys` as a mixed.tsv input, so both must match what the decoder did
+    // and what was typed.
+    #[test]
+    fn explain_matches_the_decoder() {
+        for w in ["Rustfmf", "rustno", "Signing", "konnichiha", "0.1mmwjdeh", "dkssudgktpdy", "Qk"] {
+            let mut e = Engine::new();
+            let p = type_str(&mut e, w).preedit.unwrap();
+            let x = e.explain();
+            assert_eq!(x.keys, w);
+            assert_eq!(x.segments.iter().map(|s| s.keys.as_str()).collect::<String>(), w);
+            assert_eq!(x.segments.len(), p.segments.len(), "{w}");
+            for (seg, shown) in x.segments.iter().zip(&p.segments) {
+                let texts: Vec<_> = seg.candidates.iter().map(|c| c.text.as_str()).collect();
+                let shown: Vec<_> = shown.candidates.iter().map(|c| c.text.as_str()).collect();
+                assert_eq!(texts, shown, "{w}");
+                for c in &seg.candidates {
+                    let sum: f32 = c.terms.iter().map(|t| t.value).sum();
+                    assert!((sum - c.score).abs() < 1e-4, "{w} {}: terms {sum} != score {}", c.text, c.score);
+                }
+            }
+            // The last segment's reading beats every other language's best
+            // reading of the same span after the same previous segment.
+            let last = &x.segments.last().unwrap().candidates;
+            for other in last.iter().skip(1).filter(|c| c.lang != last[0].lang) {
+                assert!(last[0].net >= other.net, "{w}: {} ({}) < {} ({})", last[0].text, last[0].net, other.text, other.net);
+            }
+        }
+        // `Rust|를`: the boundary cuts a word, and 를 is re-scored as a particle.
+        let mut e = Engine::new();
+        type_str(&mut e, "Rustfmf");
+        let x = e.explain();
+        assert!(x.segments[1].candidates[0].switch < 0.0);
+        assert_eq!(x.segments[0].candidates[0].switch, 0.0);
     }
 }

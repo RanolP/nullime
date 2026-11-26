@@ -22,15 +22,16 @@ pub struct Span {
     pub candidates: Vec<Candidate>,
 }
 
-/// All candidates for one span, scored, best first, duplicates (same text)
-/// keeping the higher score. Never empty: when no interpreter reads the span,
-/// the keys as typed come back as a low-scoring literal.
+/// All candidates for one span with their score and their rank in their
+/// interpreter's output (`None` for the literal fallback), best first, duplicates (same text) keeping the higher
+/// score. Never empty: when no interpreter reads the span, the keys as typed
+/// come back as a low-scoring literal.
 pub fn candidates(
     strokes: &[Stroke],
     interpreters: &[Box<dyn Interpreter>],
     scorer: &dyn Scorer,
-) -> Vec<(Candidate, f32)> {
-    let mut scored: Vec<(Candidate, f32)> = interpreters
+) -> Vec<(Candidate, f32, Option<usize>)> {
+    let mut scored: Vec<(Candidate, f32, Option<usize>)> = interpreters
         .iter()
         .flat_map(|interp| {
             interp
@@ -39,20 +40,20 @@ pub fn candidates(
                 .enumerate()
                 .map(|(rank, c)| {
                     let s = scorer.score(strokes, &c, rank);
-                    (c, s)
+                    (c, s, Some(rank))
                 })
         })
         .collect();
     if scored.is_empty() {
         let literal = EnglishInterpreter.interpret(strokes).remove(0);
-        return vec![(literal, FALLBACK_PER_STROKE * strokes.len() as f32)];
+        return vec![(literal, FALLBACK_PER_STROKE * strokes.len() as f32, None)];
     }
     // Stable, so ties keep interpreter order.
     scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let mut out: Vec<(Candidate, f32)> = Vec::with_capacity(scored.len());
-    for (c, s) in scored {
-        if !out.iter().any(|(o, _)| o.text == c.text) {
-            out.push((c, s));
+    let mut out: Vec<(Candidate, f32, Option<usize>)> = Vec::with_capacity(scored.len());
+    for (c, s, r) in scored {
+        if !out.iter().any(|(o, _, _)| o.text == c.text) {
+            out.push((c, s, r));
         }
     }
     out
@@ -91,7 +92,7 @@ impl Default for Lattice {
 
 /// True when a span starting at `at` would cut a run of letters, i.e. split
 /// what is typed as one word.
-fn mid_word(strokes: &[Stroke], at: usize) -> bool {
+pub fn mid_word(strokes: &[Stroke], at: usize) -> bool {
     at > 0 && strokes[at - 1].ch.is_ascii_lowercase() && strokes[at].ch.is_ascii_lowercase()
 }
 
@@ -122,9 +123,9 @@ impl Lattice {
             for start in end.saturating_sub(MAX_SPAN)..end {
                 let cands = candidates(&strokes[start..end], interpreters, scorer);
                 let mid = mid_word(strokes, start);
-                for (i, (cand, score)) in cands.iter().enumerate() {
+                for (i, (cand, score, _)) in cands.iter().enumerate() {
                     // Only each language's best candidate can start a best path.
-                    if cands[..i].iter().any(|(c, _)| c.lang == cand.lang) {
+                    if cands[..i].iter().any(|(c, _, _)| c.lang == cand.lang) {
                         continue;
                     }
                     for prev in &self.nodes[start] {
@@ -138,7 +139,7 @@ impl Lattice {
                             continue;
                         }
                         // The path's reading goes first; the rest keep score order.
-                        let mut ordered: Vec<Candidate> = cands.iter().map(|(c, _)| c.clone()).collect();
+                        let mut ordered: Vec<Candidate> = cands.iter().map(|(c, _, _)| c.clone()).collect();
                         ordered[..=i].rotate_right(1);
                         let node = Node {
                             best: total,
