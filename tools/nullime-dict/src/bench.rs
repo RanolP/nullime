@@ -30,7 +30,7 @@ fn type_keys(engine: &mut Engine, s: &str) -> (Vec<f64>, Response) {
     (times, last.expect("non-empty input"))
 }
 
-fn show(r: &Response) -> String {
+pub fn show(r: &Response) -> String {
     let Some(p) = &r.preedit else { return String::new() };
     p.segments.iter().map(|s| format!("[{} {:?}]", s.text, s.lang)).collect::<Vec<_>>().join("")
 }

@@ -17,7 +17,7 @@ pub const MOZC_COMMIT: &str = "a4541df29db443b49f81cf54665873b68fde9efa";
 const USAGE: &str = "usage:
   nullime-dict fetch --out <dir>
   nullime-dict build --mozc <dir> --out <file> [--max-cost <n>]
-  nullime-dict eval  --asset <file> [--tsv <evaluation.tsv>] [--ajimee <evaluation_items.json>]
+  nullime-dict eval  --asset <file> [--tsv <evaluation.tsv>] [--ajimee <evaluation_items.json>] [--mixed <mixed.tsv>]
   nullime-dict bench --asset <file>";
 
 fn usage() -> ExitCode {
@@ -50,8 +50,8 @@ fn main() -> ExitCode {
             build::run(&mozc, &out, build::Trim { max_cost })
         }
         "eval" => match path("asset") {
-            Some(asset) if flags.contains_key("tsv") || flags.contains_key("ajimee") => {
-                eval::run(&asset, path("tsv").as_deref(), path("ajimee").as_deref())
+            Some(asset) if ["tsv", "ajimee", "mixed"].iter().any(|f| flags.contains_key(*f)) => {
+                eval::run(&asset, path("tsv").as_deref(), path("ajimee").as_deref(), path("mixed").as_deref())
             }
             _ => return usage(),
         },

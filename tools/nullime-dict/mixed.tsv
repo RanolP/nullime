@@ -1,0 +1,65 @@
+# Mixed-language cases for `nullime-dict eval --mixed`; see docs/architecture.md.
+# Columns: keys typed (space = Space key), then one or more accepted results.
+# `## name` starts a group; accuracy is reported per group and in total.
+## ko
+dkssudgktpdy	안녕하세요
+rkatkgkqslek	감사합니다
+gksrmf dlqfurrl	한글 입력기
+dhsmf skfTlrk whgspdy	오늘 날씨가 좋네요
+Ehaqkdrkrgk	똠방각하
+wjdeh	정도
+## en
+hello world	hello world
+I love Rust	I love Rust
+the quick brown fox	the quick brown fox
+Signing	Signing
+Testing	Testing
+Design	Design
+git	git
+sudo	sudo
+node	node
+http	http
+api	api
+engine	engine
+tokyo	tokyo
+npm	npm
+cargo	cargo
+json	json
+deadline	deadline
+## ja
+konnichiha	こんにちは
+arigatou	ありがとう
+toukyou	東京
+nihongo	日本語
+kitte	切手	切って
+sushi	寿司
+anime	アニメ
+kanji	漢字	感じ
+watashihanihonjindesu	私は日本人です
+kyouhaiitenkidesune	今日はいい天気ですね
+kinouhatomodachitoeigawomimashita	昨日は友達と映画を見ました
+## en+ko-particle
+Rustfmf	Rust를
+Pythondms	Python은
+GitHubdptj	GitHub에서
+Rustdptjsms	Rust에서는
+Reactfh	React로
+Dockerrk	Docker가
+## en+ja-particle
+Rustwo	Rustを
+GitHubni	GitHubに
+rustno	rustの
+reactha	reactは
+## ko-sentence+en
+dhsmf Reactfmf qodnjTek	오늘 React를 배웠다
+git pushfmf goTek	git push를 했다
+dl PRdms flqbrk vlfdygody	이 PR은 리뷰가 필요해요
+npm install gndp tlfgod	npm install 후에 실행
+0.1mmwjdeh	0.1mm정도
+10cmwjdeh	10cm정도
+5tldp aksskdy	5시에 만나요
+## ja-sentence+en
+Rustwobenkyoushiteimasu	Rustを勉強しています
+GitHubnipushshimashita	GitHubにpushしました
+## ko+ja
+dkssud konnichiha	안녕 こんにちは

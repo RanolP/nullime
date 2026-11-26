@@ -142,11 +142,16 @@ cargo run --release -p nullime-dict -- eval --asset nullime-ja.dict --tsv <dir>/
 ```
 
 ```sh
+cargo run --release -p nullime-dict -- eval --asset nullime-ja.dict --mixed tools/nullime-dict/mixed.tsv
+```
+
+```sh
 cargo run --release -p nullime-dict -- bench --asset nullime-ja.dict
 ```
 
 - `build`는 쓴 파일을 다시 `JaAsset`으로 읽어 모든 연접 비용과 모든 항목을 확인한다. `--max-cost n`은 Mozc 비용이 n보다 큰(드문) 단어를 뺀다. 웹 데모의 작은 사전(`nullime-ja.small.dict`)은 `--max-cost 6000`이다.
 - `eval`은 엔진의 `convert`를 직접 불러 1순위가 정답인지 센다 (D19). AJIMEE-Bench 파일은 저장소에 없고 경로로 받는다. AJIMEE의 `context_text`는 쓰지 않는다.
+- `--mixed`는 언어 판정을 잰다. `tools/nullime-dict/mixed.tsv`의 줄마다 새 `Engine`에 키를 치고(공백은 스페이스 키라 확정한다), 앱에 남는 텍스트가 허용 답 중 하나인지 센다. 열은 `키 입력열\t답[\t다른 답…]`이고, `## 이름` 줄이 묶음을 시작한다. 묶음별·전체 정확도와 틀린 줄의 칸(`[text Lang]`)을 낸다. 위 두 평가셋과 달리 저장소에 있다.
 - 사용자가 직접 빌드한 같은 형식의 파일도 그대로 꽂힌다 (D17). 로더는 Mozc 전용 가정을 하지 않는다.
 
 형식 (버전 1, 모든 정수는 little-endian):
