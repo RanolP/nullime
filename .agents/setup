@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb: Rust stable with the wasm target, mise tools (wasm-bindgen-cli),
+# warmed test build, and the web demo (wasm + Mozc dictionary assets).
+# Idempotent; a warm rerun only checks what is already installed.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+step() { printf '\n==> %s (t=%ss)\n' "$*" "$SECONDS"; }
+
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+step "rustup + stable toolchain"
+if ! command -v rustup >/dev/null 2>&1; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+fi
+rustup toolchain install stable --profile minimal \
+  --component rustfmt,clippy --target wasm32-unknown-unknown --no-self-update
+
+step "cargo-binstall (lets mise install prebuilt cargo tools)"
+if ! command -v cargo-binstall >/dev/null 2>&1; then
+  curl -L --proto '=https' --tlsv1.2 -sSf \
+    https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+fi
+
+step "mise tools (mise.toml)"
+if ! command -v mise >/dev/null 2>&1; then
+  curl -fsSL https://mise.run | MISE_QUIET=1 sh
+fi
+mise trust --quiet mise.toml
+mise install --yes
+
+step "login shell PATH"
+marker="# nullime orb toolchain"
+if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<'EOF'
+
+# nullime orb toolchain
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+EOF
+fi
+
+step "warm test build"
+cargo test --workspace --exclude nullime-windows --no-run
+
+step "web demo (scripts/build-web.sh)"
+scripts/build-web.sh
+
+step "done"
